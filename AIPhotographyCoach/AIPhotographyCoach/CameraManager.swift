@@ -2,19 +2,20 @@ import Foundation
 import AVFoundation
 import SwiftUI
 
+// NSObject ve AVCaptureVideoDataOutputSampleBufferDelegate ekledik (Kameradan gelen kareleri dinlemek için)
 @Observable
-class CameraManager {
+class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     var isAuthorized: Bool = false
-    
-    // Kameranın ana yöneticisi
     let session = AVCaptureSession()
     
-    // Kamerayı başlatırken ana ekranı (UI) dondurmamak için arka plan kuyruğu oluşturuyoruz
+    // Görüntü karelerini (frame) dışarı aktaracağımız özellik
+    var onFrameAvailable: ((CVPixelBuffer) -> Void)?
+    
     private let sessionQueue = DispatchQueue(label: "com.ridvanyigit.CameraSessionQueue")
+    private let videoOutput = AVCaptureVideoDataOutput() // Yeni: Görüntü çıkışı
     
     func checkPermission() {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
-        
         switch status {
         case .authorized:
             isAuthorized = true
@@ -32,42 +33,41 @@ class CameraManager {
         AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
             DispatchQueue.main.async {
                 self?.isAuthorized = granted
-                if granted {
-                    self?.setupCamera()
-                }
+                if granted { self?.setupCamera() }
             }
         }
     }
     
-    // Kamerayı yapılandıran ana fonksiyon
     private func setupCamera() {
-        // İşlemleri arka plan kuyruğuna atıyoruz
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
-            
-            // 1. İşlem oturumunu başlatmaya hazırlan
             self.session.beginConfiguration()
-            
-            // Yüksek çözünürlük yerine performansı (ve düşük gecikmeyi) artırmak için 1080p seçiyoruz
             self.session.sessionPreset = .hd1920x1080
             
-            // 2. Fiziksel cihazı bul (Arka geniş açı kamera)
             guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-                  let videoDeviceInput = try? AVCaptureDeviceInput(device: videoDevice) else {
-                print("Hata: Arka kamera bulunamadı veya erişilemedi.")
-                return
-            }
+                  let videoDeviceInput = try? AVCaptureDeviceInput(device: videoDevice) else { return }
             
-            // 3. Cihazı oturuma bağla
             if self.session.canAddInput(videoDeviceInput) {
                 self.session.addInput(videoDeviceInput)
             }
             
-            // 4. Konfigürasyonu bitir
-            self.session.commitConfiguration()
+            // YENİ: Video çıkışını ayarla ve kareleri al
+            if self.session.canAddOutput(self.videoOutput) {
+                self.session.addOutput(self.videoOutput)
+                // Kareleri işlemek için ayrı bir thread (kuyruk) oluşturuyoruz (UI donmasın diye)
+                let videoQueue = DispatchQueue(label: "com.ridvanyigit.VideoQueue")
+                self.videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
+            }
             
-            // 5. Kamerayı çalıştır
+            self.session.commitConfiguration()
             self.session.startRunning()
         }
+    }
+    
+    // YENİ: Kameradan her yeni kare (frame) geldiğinde bu fonksiyon otomatik tetiklenir
+    nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        // Gelen veriyi işlenebilir piksel formatına (CVPixelBuffer) çevir ve dışarıya fırlat
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        onFrameAvailable?(pixelBuffer)
     }
 }
