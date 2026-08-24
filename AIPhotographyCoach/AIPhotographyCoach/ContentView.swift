@@ -1,25 +1,35 @@
 import SwiftUI
 
 struct ContentView: View {
-    // CameraManager'ı View'a bağlıyoruz
     @State private var cameraManager = CameraManager()
     
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: cameraManager.isAuthorized ? "camera.fill" : "camera.slash.fill")
-                .font(.system(size: 60))
-                .foregroundColor(cameraManager.isAuthorized ? .green : .red)
+        ZStack {
+            // Arka planı her zaman siyah yapalım ki modern görünsün
+            Color.black.ignoresSafeArea()
             
-            Text(cameraManager.isAuthorized ? "Kamera İzni Alındı ✅" : "Kamera İzni Bekleniyor ❌")
-                .font(.headline)
-            
-            if !cameraManager.isAuthorized {
-                Text("Lütfen uygulamanın çalışması için kamera izni verin.")
-                    .multilineTextAlignment(.center)
-                    .padding()
+            if cameraManager.isAuthorized {
+                // İzin varsa kamerayı tüm ekranda göster
+                CameraPreviewView(session: cameraManager.session)
+                    .ignoresSafeArea()
+            } else {
+                // İzin yoksa uyarıyı göster
+                VStack(spacing: 20) {
+                    Image(systemName: "video.slash.fill") // Hatalı ikonu düzelttik
+                        .font(.system(size: 60))
+                        .foregroundColor(.red)
+                    
+                    Text("Kamera İzni Bekleniyor")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    
+                    Text("Lütfen ayarlardan uygulamanın kameraya erişmesine izin verin.")
+                        .multilineTextAlignment(.center)
+                        .padding()
+                        .foregroundColor(.gray)
+                }
             }
         }
-        // Ekran ilk açıldığında izni kontrol et
         .onAppear {
             cameraManager.checkPermission()
         }
