@@ -21,28 +21,28 @@ struct LightingBadgeView: View {
     
     private var message: String {
         switch condition {
-        case .calculating: return "Işık Ölçülüyor..."
-        case .tooDark: return "Çok Karanlık"
-        case .tooBright: return "Ters Işık / Parlak"
-        case .optimal: return "Işık İyi"
+        case .calculating: return "Measuring Light..."
+        case .tooDark: return "Too Dark"
+        case .tooBright: return "Backlight / Too Bright"
+        case .optimal: return "Good Light"
         }
     }
     
     private var iconName: String {
         switch condition {
         case .calculating: return "sun.min.fill"
-        case .tooDark: return "moon.fill" // Karanlıkta Ay ikonu
-        case .tooBright: return "sun.max.fill" // Parlakta tam Güneş
-        case .optimal: return "sun.and.horizon.fill" // İdealde Ufuk/Güneş
+        case .tooDark: return "moon.fill"
+        case .tooBright: return "sun.max.fill"
+        case .optimal: return "sun.and.horizon.fill"
         }
     }
     
     private var backgroundColor: Color {
         switch condition {
         case .calculating: return Color.black.opacity(0.5)
-        case .tooDark: return Color.blue.opacity(0.8) // Karanlık hissiyatı
-        case .tooBright: return Color.orange.opacity(0.9) // Uyarı hissiyatı
-        case .optimal: return Color.green.opacity(0.8) // Güvenli hissiyatı
+        case .tooDark: return Color.blue.opacity(0.8)
+        case .tooBright: return Color.orange.opacity(0.9)
+        case .optimal: return Color.green.opacity(0.8)
         }
     }
 }

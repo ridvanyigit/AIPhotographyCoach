@@ -8,17 +8,17 @@ class MotionManager {
     private let motionManager = CMMotionManager()
     private let guidanceEngine = GuidanceEngine()
     
-    var smoothedTilt: Double = 0.0 // Artık roll yerine genel "Tilt (Eğim)" diyoruz
+    var smoothedTilt: Double = 0.0
     var currentState: GuidanceState = .unknown
     
-    private let filterFactor: Double = 0.2
+    // Decreased from 0.2 to 0.08 for heavier smoothing (removes jitter completely)
+    private let filterFactor: Double = 0.08 
     private var isFirstUpdate = true
     
     private let hapticGenerator = UIImpactFeedbackGenerator(style: .medium)
     private var wasAlignedBefore = false
     
     init() {
-        // Cihazın döndüğünü anlamak için bildirimleri açıyoruz
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
     }
     
@@ -35,21 +35,15 @@ class MotionManager {
         motionManager.startDeviceMotionUpdates(to: queue) { [weak self] motion, error in
             guard let motion = motion, error == nil, let self = self else { return }
             
-            // Sensör verilerini dereceye çevir
             let rollDeg = motion.attitude.roll * (180.0 / .pi)
             let pitchDeg = motion.attitude.pitch * (180.0 / .pi)
             
-            // EKRANIN YÖNÜNE GÖRE İLGİLİ EKSENİ (TILT) SEÇİYORUZ
             var currentTilt: Double = 0.0
             switch UIDevice.current.orientation {
-            case .landscapeLeft:
-                currentTilt = pitchDeg
-            case .landscapeRight:
-                currentTilt = -pitchDeg
-            case .portraitUpsideDown:
-                currentTilt = -rollDeg
-            default: // Portrait
-                currentTilt = rollDeg
+            case .landscapeLeft: currentTilt = pitchDeg
+            case .landscapeRight: currentTilt = -pitchDeg
+            case .portraitUpsideDown: currentTilt = -rollDeg
+            default: currentTilt = rollDeg
             }
             
             DispatchQueue.main.async {
