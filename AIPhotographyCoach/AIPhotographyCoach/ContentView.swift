@@ -13,14 +13,20 @@ struct ContentView: View {
                 CameraPreviewView(session: cameraManager.session)
                     .ignoresSafeArea()
                 
-                // YENİ: Fotoğrafçılık Izgarası
                 CompositionGridView()
                     .ignoresSafeArea()
                 
                 FaceDetectionView(faces: visionManager.detectedFaces)
                     .ignoresSafeArea()
                 
-                // Ufuk asistanına ekrandaki yüz durumunu (hasFace) aktarıyoruz
+                // YENİ: Üst kısımdaki Fotoğrafçılık Koçu
+                VStack {
+                    CoachingBadgeView(advice: visionManager.framingAdvice)
+                        .padding(.top, 20) // Çentiğin/Dynamic Island'ın altına alıyoruz
+                    Spacer()
+                }
+                
+                // Alt kısımdaki Ufuk Asistanı
                 GuidanceView(
                     tilt: motionManager.smoothedTilt,
                     state: motionManager.currentState,
