@@ -4,7 +4,9 @@ struct ContentView: View {
     @State private var cameraManager = CameraManager()
     @State private var motionManager = MotionManager()
     @State private var visionManager = VisionManager()
+    
     private let lightingCoach = LightingCoach()
+    @State private var voiceCoach = VoiceCoachManager() // YENİ: Ses Asistanı
     
     var body: some View {
         ZStack {
@@ -56,6 +58,13 @@ struct ContentView: View {
         }
         .onDisappear {
             motionManager.stopUpdates()
+        }
+        // YENİ: Ekrandaki kompozisyon veya eğim değiştiğinde Sesli Asistanı uyar
+        .onChange(of: visionManager.framingAdvice) { _, newAdvice in
+            voiceCoach.provideGuidance(framing: newAdvice, tilt: motionManager.currentState)
+        }
+        .onChange(of: motionManager.currentState) { _, newTilt in
+            voiceCoach.provideGuidance(framing: visionManager.framingAdvice, tilt: newTilt)
         }
     }
 }

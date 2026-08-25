@@ -5,32 +5,44 @@ struct GuidanceView: View {
     let state: GuidanceState
     let hasFace: Bool
     
-    // Magnetic Snap: Eğer cihaz hizalıysa çizgiyi sıfır derecede kilitler
+    // Magnetic Snap Logic
     private var displayTilt: Double {
         return state == .aligned ? 0.0 : tilt
+    }
+    
+    // 3-Color Traffic Light System (Green, Yellow, Red)
+    private var dynamicColor: Color {
+        if state == .aligned {
+            return .green
+        } else if abs(tilt) <= 8.0 {
+            // Not perfect, but acceptable/close (Yellow)
+            return .yellow
+        } else {
+            // Bad angle (Red)
+            return .red
+        }
     }
     
     var body: some View {
         VStack {
             Spacer()
             
-            // MINIMALIST CROSSHAIR (Şeffaf Koordinat Sistemi)
+            // MINIMALIST CROSSHAIR
             ZStack {
-                // Merkezdeki sabit şeffaf artı işareti (Cross)
+                // Fixed transparent center cross
                 Group {
                     Rectangle().frame(width: 40, height: 1)
                     Rectangle().frame(width: 1, height: 40)
                 }
                 .foregroundColor(Color.white.opacity(0.3))
                 
-                // Dönen dinamik terazi çizgileri (Sağ ve sol kollar)
+                // Rotating arms with dynamic color
                 HStack(spacing: 60) {
                     Rectangle().frame(width: 40, height: 2)
                     Rectangle().frame(width: 40, height: 2)
                 }
-                .foregroundColor(state == .aligned ? .green : .white.opacity(0.8))
-                .shadow(color: state == .aligned ? .green : .clear, radius: 4)
-                // Manyetik dönüş uyguluyoruz
+                .foregroundColor(dynamicColor)
+                .shadow(color: dynamicColor.opacity(0.8), radius: 4)
                 .rotationEffect(.degrees(-displayTilt))
                 .animation(.spring(response: 0.2, dampingFraction: 0.6), value: displayTilt)
             }
@@ -38,10 +50,9 @@ struct GuidanceView: View {
             
             Spacer()
             
-            // ENGLISH INSTRUCTIONS
             Text(instructionText)
                 .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundColor(state == .aligned ? .green : .white)
+                .foregroundColor(dynamicColor)
                 .shadow(color: .black.opacity(0.8), radius: 2, x: 0, y: 1)
                 .padding(.bottom, 60)
                 .animation(.easeInOut, value: state)
