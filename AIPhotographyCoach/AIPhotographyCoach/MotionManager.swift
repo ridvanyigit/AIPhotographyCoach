@@ -8,15 +8,17 @@ class MotionManager {
     private let motionManager = CMMotionManager()
     private let guidanceEngine = GuidanceEngine()
     
-    var smoothedTilt: Double = 0.0
-    var currentState: GuidanceState = .unknown
+    var smoothedRoll: Double = 0.0
+    var smoothedPitchDeviation: Double = 0.0
     
-    // Decreased from 0.2 to 0.08 for heavier smoothing (removes jitter completely)
-    private let filterFactor: Double = 0.08 
+    var currentRollState: RollState = .unknown
+    var currentPitchState: PitchState = .unknown
+    
+    private let filterFactor: Double = 0.08
     private var isFirstUpdate = true
     
     private let hapticGenerator = UIImpactFeedbackGenerator(style: .medium)
-    private var wasAlignedBefore = false
+    private var wasFullyAlignedBefore = false
     
     init() {
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -35,33 +37,52 @@ class MotionManager {
         motionManager.startDeviceMotionUpdates(to: queue) { [weak self] motion, error in
             guard let motion = motion, error == nil, let self = self else { return }
             
-            let rollDeg = motion.attitude.roll * (180.0 / .pi)
-            let pitchDeg = motion.attitude.pitch * (180.0 / .pi)
+            let rawRoll = motion.attitude.roll * (180.0 / .pi)
+            let rawPitch = motion.attitude.pitch * (180.0 / .pi)
             
-            var currentTilt: Double = 0.0
+            var currentRoll: Double = 0.0
+            var currentPitch: Double = 0.0
+            
             switch UIDevice.current.orientation {
-            case .landscapeLeft: currentTilt = pitchDeg
-            case .landscapeRight: currentTilt = -pitchDeg
-            case .portraitUpsideDown: currentTilt = -rollDeg
-            default: currentTilt = rollDeg
+            case .landscapeLeft:
+                currentRoll = rawPitch
+                currentPitch = -rawRoll
+            case .landscapeRight:
+                currentRoll = -rawPitch
+                currentPitch = rawRoll
+            case .portraitUpsideDown:
+                currentRoll = -rawRoll
+                currentPitch = -rawPitch
+            default:
+                currentRoll = rawRoll
+                currentPitch = rawPitch
             }
+            
+            // PITCH TARGET LOGIC: Snap to the nearest 90 degrees (0 for flat, 90 for upright)
+            let targetPitch = round(currentPitch / 90.0) * 90.0
+            let pitchDeviation = currentPitch - targetPitch
             
             DispatchQueue.main.async {
                 if self.isFirstUpdate {
-                    self.smoothedTilt = currentTilt
+                    self.smoothedRoll = currentRoll
+                    self.smoothedPitchDeviation = pitchDeviation
                     self.isFirstUpdate = false
                 } else {
-                    self.smoothedTilt = (currentTilt * self.filterFactor) + (self.smoothedTilt * (1.0 - self.filterFactor))
+                    self.smoothedRoll = (currentRoll * self.filterFactor) + (self.smoothedRoll * (1.0 - self.filterFactor))
+                    self.smoothedPitchDeviation = (pitchDeviation * self.filterFactor) + (self.smoothedPitchDeviation * (1.0 - self.filterFactor))
                 }
                 
-                let newState = self.guidanceEngine.evaluate(roll: self.smoothedTilt)
-                self.currentState = newState
+                let result = self.guidanceEngine.evaluate(roll: self.smoothedRoll, pitchDeviation: self.smoothedPitchDeviation)
+                self.currentRollState = result.roll
+                self.currentPitchState = result.pitch
                 
-                if newState == .aligned && !self.wasAlignedBefore {
+                let isFullyAligned = (result.roll == .aligned && result.pitch == .aligned)
+                
+                if isFullyAligned && !self.wasFullyAlignedBefore {
                     self.hapticGenerator.impactOccurred()
-                    self.wasAlignedBefore = true
-                } else if newState != .aligned {
-                    self.wasAlignedBefore = false
+                    self.wasFullyAlignedBefore = true
+                } else if !isFullyAligned {
+                    self.wasFullyAlignedBefore = false
                 }
             }
         }
@@ -70,6 +91,6 @@ class MotionManager {
     func stopUpdates() {
         motionManager.stopDeviceMotionUpdates()
         isFirstUpdate = true
-        wasAlignedBefore = false
+        wasFullyAlignedBefore = false
     }
 }

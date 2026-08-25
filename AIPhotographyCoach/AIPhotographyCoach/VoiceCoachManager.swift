@@ -10,48 +10,47 @@ class VoiceCoachManager: NSObject, AVSpeechSynthesizerDelegate {
     override init() {
         super.init()
         synthesizer.delegate = self
-        
-        // Audio session setup so it plays nicely with the system
         try? AVAudioSession.sharedInstance().setCategory(.playback, options: .mixWithOthers)
         try? AVAudioSession.sharedInstance().setActive(true)
     }
     
-    func provideGuidance(framing: FramingAdvice, tilt: GuidanceState) {
+    func provideGuidance(framing: FramingAdvice, roll: RollState, pitch: PitchState) {
         var phraseToSpeak = ""
         
-        // 1. Priority: Framing (Positioning the subject)
+        // Priority 1: Framing (Subject position)
         if framing != .perfect && framing != .searching {
             phraseToSpeak = textForFraming(framing)
+        } 
+        // Priority 2: Roll (Left/Right Leveling)
+        else if roll != .aligned && roll != .unknown {
+            phraseToSpeak = textForRoll(roll)
         }
-        // 2. Priority: Tilt (Leveling the camera)
-        else if tilt != .aligned && tilt != .unknown {
-            phraseToSpeak = textForTilt(tilt)
+        // Priority 3: Pitch (Up/Down Leveling)
+        else if pitch != .aligned && pitch != .unknown {
+            phraseToSpeak = textForPitch(pitch)
         }
-        // 3. Perfect condition
-        else if framing == .perfect && tilt == .aligned {
+        // Priority 4: All Perfect
+        else if framing == .perfect && roll == .aligned && pitch == .aligned {
             phraseToSpeak = "Perfect. Hold still."
         }
         
         guard !phraseToSpeak.isEmpty else { return }
-        
-        // Prevent spamming
         guard !isSpeaking else { return }
-        guard phraseToSpeak != lastSpokenPhrase else { return }
+        guard phraseToSpeak != lastSpokenPhrase else { return } 
         
         speak(phraseToSpeak)
     }
     
     private func speak(_ text: String) {
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US") // English native voice
-        utterance.rate = 0.5 // Natural speaking speed
-        utterance.pitchMultiplier = 1.1 // Slightly friendlier tone
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5
+        utterance.pitchMultiplier = 1.1
         
         lastSpokenPhrase = text
         synthesizer.speak(utterance)
     }
     
-    // Convert Enums to English Sentences
     private func textForFraming(_ advice: FramingAdvice) -> String {
         switch advice {
         case .moveCloser: return "Move a bit closer."
@@ -62,25 +61,29 @@ class VoiceCoachManager: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
     
-    private func textForTilt(_ tilt: GuidanceState) -> String {
-        switch tilt {
+    private func textForRoll(_ roll: RollState) -> String {
+        switch roll {
         case .tiltLeft: return "Tilt phone left."
         case .tiltRight: return "Tilt phone right."
         default: return ""
         }
     }
     
-    // MARK: - AVSpeechSynthesizerDelegate
+    private func textForPitch(_ pitch: PitchState) -> String {
+        switch pitch {
+        case .tiltUp: return "Tilt phone up."
+        case .tiltDown: return "Tilt phone down."
+        default: return ""
+        }
+    }
     
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
         isSpeaking = true
     }
     
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        // 2.0 seconds cooldown after finishing a sentence so it doesn't talk non-stop
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.isSpeaking = false
-            // Reset last spoken phrase after 4 seconds so it can remind the user again if needed
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 self.lastSpokenPhrase = ""
             }

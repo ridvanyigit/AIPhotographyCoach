@@ -1,50 +1,53 @@
 import SwiftUI
 
 struct GuidanceView: View {
-    let tilt: Double
-    let state: GuidanceState
+    let roll: Double
+    let pitchDeviation: Double
+    let rollState: RollState
+    let pitchState: PitchState
     let hasFace: Bool
     
     // Magnetic Snap Logic
-    private var displayTilt: Double {
-        return state == .aligned ? 0.0 : tilt
+    private var displayRoll: Double { return rollState == .aligned ? 0.0 : roll }
+    // Visual Y-Offset for Pitch (Moving the horizontal lines up/down slightly to show tilt)
+    private var displayPitchOffset: CGFloat { return pitchState == .aligned ? 0.0 : CGFloat(pitchDeviation * 2.0) }
+    
+    // Independent Colors
+    private var rollColor: Color {
+        if rollState == .aligned { return .green }
+        else if abs(roll) <= 8.0 { return .yellow }
+        else { return .red }
     }
     
-    // 3-Color Traffic Light System (Green, Yellow, Red)
-    private var dynamicColor: Color {
-        if state == .aligned {
-            return .green
-        } else if abs(tilt) <= 8.0 {
-            // Not perfect, but acceptable/close (Yellow)
-            return .yellow
-        } else {
-            // Bad angle (Red)
-            return .red
-        }
+    private var pitchColor: Color {
+        if pitchState == .aligned { return .green }
+        else if abs(pitchDeviation) <= 8.0 { return .yellow }
+        else { return .red }
     }
     
     var body: some View {
         VStack {
             Spacer()
             
-            // MINIMALIST CROSSHAIR
+            // CROSSHAIR
             ZStack {
-                // Fixed transparent center cross
-                Group {
-                    Rectangle().frame(width: 40, height: 1)
-                    Rectangle().frame(width: 1, height: 40)
-                }
-                .foregroundColor(Color.white.opacity(0.3))
+                // FIXED VERTICAL LINE (Pitch Indicator)
+                Rectangle()
+                    .frame(width: 2, height: 40)
+                    .foregroundColor(pitchColor)
+                    .shadow(color: pitchColor.opacity(0.8), radius: 4)
                 
-                // Rotating arms with dynamic color
+                // ROTATING & SLIDING HORIZONTAL ARMS (Roll Indicator)
                 HStack(spacing: 60) {
                     Rectangle().frame(width: 40, height: 2)
                     Rectangle().frame(width: 40, height: 2)
                 }
-                .foregroundColor(dynamicColor)
-                .shadow(color: dynamicColor.opacity(0.8), radius: 4)
-                .rotationEffect(.degrees(-displayTilt))
-                .animation(.spring(response: 0.2, dampingFraction: 0.6), value: displayTilt)
+                .foregroundColor(rollColor)
+                .shadow(color: rollColor.opacity(0.8), radius: 4)
+                .offset(y: displayPitchOffset) // Slides up/down based on pitch
+                .rotationEffect(.degrees(-displayRoll)) // Rotates based on roll
+                .animation(.spring(response: 0.2, dampingFraction: 0.6), value: displayRoll)
+                .animation(.spring(response: 0.2, dampingFraction: 0.6), value: displayPitchOffset)
             }
             .frame(height: 100)
             
@@ -52,24 +55,33 @@ struct GuidanceView: View {
             
             Text(instructionText)
                 .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundColor(dynamicColor)
+                .foregroundColor(isFullyAligned ? .green : .white)
                 .shadow(color: .black.opacity(0.8), radius: 2, x: 0, y: 1)
-                .padding(.bottom, 60)
-                .animation(.easeInOut, value: state)
+                .padding(.bottom, 140)
+                .animation(.easeInOut, value: rollState)
+                .animation(.easeInOut, value: pitchState)
         }
         .allowsHitTesting(false)
     }
     
+    private var isFullyAligned: Bool {
+        return rollState == .aligned && pitchState == .aligned
+    }
+    
     private var instructionText: String {
-        switch state {
-        case .aligned:
+        // Priority 1: Roll (Left/Right)
+        if rollState == .tiltLeft { return "Tilt Left ⤺" }
+        if rollState == .tiltRight { return "⤻ Tilt Right" }
+        
+        // Priority 2: Pitch (Up/Down)
+        if pitchState == .tiltUp { return "Tilt Up ⇡" }
+        if pitchState == .tiltDown { return "Tilt Down ⇣" }
+        
+        // Priority 3: Perfect Alignment
+        if isFullyAligned {
             return hasFace ? "Perfect! Take Photo 📸" : "Level! Shoot 📸"
-        case .tiltLeft:
-            return "Tilt Left ⤺"
-        case .tiltRight:
-            return "⤻ Tilt Right"
-        case .unknown:
-            return "Calculating..."
         }
+        
+        return "Calculating..."
     }
 }
