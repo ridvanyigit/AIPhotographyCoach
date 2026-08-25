@@ -14,6 +14,10 @@ struct ContentView: View {
     @State private var focusPoint: CGPoint? = nil
     @State private var showFocusRect: Bool = false
     
+    // NEW: States for the Photo Capture Animation
+    @State private var capturedImage: UIImage? = nil
+    @State private var isAnimatingCapturedImage: Bool = false
+    
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -49,7 +53,6 @@ struct ContentView: View {
                         Spacer()
                     }
                     
-                    // UPDATED: Passing both Roll and Pitch deviations and states
                     GuidanceView(
                         roll: motionManager.smoothedRoll,
                         pitchDeviation: motionManager.smoothedPitchDeviation,
@@ -95,10 +98,27 @@ struct ContentView: View {
                         .padding(.bottom, 40)
                     }
                     
+                    // SCREEN FLASH EFFECT
                     Color.white
                         .opacity(flashOpacity)
                         .ignoresSafeArea()
                         .allowsHitTesting(false)
+                    
+                    // NEW: CAPTURED PHOTO ANIMATION LAYER
+                    if let image = capturedImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
+                            // Animation steps: Scale down, move down, fade out, add rounded corners
+                            .scaleEffect(isAnimatingCapturedImage ? 0.3 : 1.0)
+                            .offset(y: isAnimatingCapturedImage ? geometry.size.height / 1.5 : 0)
+                            .opacity(isAnimatingCapturedImage ? 0.0 : 1.0)
+                            .cornerRadius(isAnimatingCapturedImage ? 60 : 0)
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
+                    }
                     
                 } else {
                     VStack(spacing: 20) {
@@ -116,6 +136,12 @@ struct ContentView: View {
             .onAppear {
                 cameraManager.checkPermission()
                 motionManager.startUpdates()
+                
+                // Set up photo capture listener
+                cameraManager.onPhotoCaptured = { image in
+                    triggerPhotoAnimation(with: image)
+                }
+                
                 cameraManager.onFrameAvailable = { pixelBuffer in
                     visionManager.processFrame(pixelBuffer)
                 }
@@ -142,17 +168,39 @@ struct ContentView: View {
     
     private func takePhoto() {
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        
+        // 1. Initial White Flash
         withAnimation(.linear(duration: 0.1)) { flashOpacity = 1.0 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             withAnimation(.easeOut(duration: 0.2)) { flashOpacity = 0.0 }
         }
+        
+        // 2. Capture the actual photo
         cameraManager.capturePhoto()
+    }
+    
+    // NEW: Animation Trigger Function
+    private func triggerPhotoAnimation(with image: UIImage) {
+        // Set the image initially full screen
+        capturedImage = image
+        isAnimatingCapturedImage = false
+        
+        // Slightly delay the start of the slide-down animation so user registers the photo
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                isAnimatingCapturedImage = true
+            }
+            
+            // Clean up memory after animation finishes
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                capturedImage = nil
+            }
+        }
     }
     
     private func checkAutoCapture() {
         guard isAutoCaptureEnabled else { return }
         
-        // STRICT RULE: Both Roll AND Pitch must be perfect!
         let isTiltPerfect = (motionManager.currentRollState == .aligned && motionManager.currentPitchState == .aligned)
         let isFramingPerfect = visionManager.detectedFaces.isEmpty ? true : (visionManager.framingAdvice == .perfect)
         
