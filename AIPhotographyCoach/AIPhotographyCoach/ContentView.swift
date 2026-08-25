@@ -5,6 +5,9 @@ struct ContentView: View {
     @State private var motionManager = MotionManager()
     @State private var visionManager = VisionManager()
     
+    // Işık Koçumuzu tanımlıyoruz
+    private let lightingCoach = LightingCoach()
+    
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -19,14 +22,19 @@ struct ContentView: View {
                 FaceDetectionView(faces: visionManager.detectedFaces)
                     .ignoresSafeArea()
                 
-                // YENİ: Üst kısımdaki Fotoğrafçılık Koçu
-                VStack {
+                // ÜST BİLDİRİM PANELİ (Koçlar)
+                VStack(spacing: 12) {
+                    // 1. Kompozisyon Koçu (Büyük)
                     CoachingBadgeView(advice: visionManager.framingAdvice)
-                        .padding(.top, 20) // Çentiğin/Dynamic Island'ın altına alıyoruz
+                        .padding(.top, 20)
+                    
+                    // 2. YENİ: Işık Koçu (Küçük)
+                    LightingBadgeView(condition: lightingCoach.evaluate(brightness: cameraManager.currentBrightness))
+                    
                     Spacer()
                 }
                 
-                // Alt kısımdaki Ufuk Asistanı
+                // ALT BİLDİRİM PANELİ (Ufuk Çizgisi)
                 GuidanceView(
                     tilt: motionManager.smoothedTilt,
                     state: motionManager.currentState,
