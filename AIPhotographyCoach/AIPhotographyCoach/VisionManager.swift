@@ -6,9 +6,13 @@ import UIKit
 @Observable
 class VisionManager {
     var detectedFaces: [CGRect] = []
-    var framingAdvice: FramingAdvice = .searching // YENİ: Koçun anlık tavsiyesi
+    var framingAdvice: FramingAdvice = .searching
     
-    private let coach = PhotographyCoach() // Koç motorunu başlattık
+    // NEW: Body pose state
+    var poseAdvice: PoseAdvice = .none 
+    
+    private let framingCoach = PhotographyCoach()
+    private let poseCoach = PoseCoach() // NEW
     
     private func getVisionOrientation() -> CGImagePropertyOrientation {
         switch UIDevice.current.orientation {
@@ -20,19 +24,30 @@ class VisionManager {
     }
     
     func processFrame(_ pixelBuffer: CVPixelBuffer) {
-        let request = VNDetectFaceRectanglesRequest { [weak self] request, error in
+        // 1. Request for Face Rectangles
+        let faceRequest = VNDetectFaceRectanglesRequest { [weak self] request, error in
             guard let results = request.results as? [VNFaceObservation], error == nil else { return }
-            
             DispatchQueue.main.async {
-                guard let self = self else { return }
-                // 1. Yüzleri güncelle
-                self.detectedFaces = results.map { $0.boundingBox }
-                // 2. Fotoğrafçılık Koçu'na yüzleri gönderip tavsiye al
-                self.framingAdvice = self.coach.evaluateFraming(faces: self.detectedFaces)
+                self?.detectedFaces = results.map { $0.boundingBox }
+                if let self = self {
+                    self.framingAdvice = self.framingCoach.evaluateFraming(faces: self.detectedFaces)
+                }
+            }
+        }
+        
+        // 2. NEW: Request for Human Body Pose
+        let poseRequest = VNDetectHumanBodyPoseRequest { [weak self] request, error in
+            guard let results = request.results as? [VNHumanBodyPoseObservation], let firstPose = results.first else {
+                DispatchQueue.main.async { self?.poseAdvice = .none }
+                return
+            }
+            DispatchQueue.main.async {
+                self?.poseAdvice = self?.poseCoach.evaluatePose(observation: firstPose) ?? .none
             }
         }
         
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: getVisionOrientation(), options: [:])
-        try? handler.perform([request])
+        // Run both AI models simultaneously
+        try? handler.perform([faceRequest, poseRequest])
     }
 }

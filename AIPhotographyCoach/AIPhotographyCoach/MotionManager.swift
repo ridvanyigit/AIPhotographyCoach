@@ -10,23 +10,18 @@ class MotionManager {
     
     var smoothedRoll: Double = 0.0
     var smoothedPitchDeviation: Double = 0.0
-    
     var currentRollState: RollState = .unknown
     var currentPitchState: PitchState = .unknown
     
-    private let filterFactor: Double = 0.08
+    // REDUCED FILTER FACTOR: From 0.08 to 0.04. This makes the lines move slower and much smoother.
+    private let filterFactor: Double = 0.04
     private var isFirstUpdate = true
     
     private let hapticGenerator = UIImpactFeedbackGenerator(style: .medium)
     private var wasFullyAlignedBefore = false
     
-    init() {
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-    }
-    
-    deinit {
-        UIDevice.current.endGeneratingDeviceOrientationNotifications()
-    }
+    init() { UIDevice.current.beginGeneratingDeviceOrientationNotifications() }
+    deinit { UIDevice.current.endGeneratingDeviceOrientationNotifications() }
     
     func startUpdates() {
         guard motionManager.isDeviceMotionAvailable else { return }
@@ -44,21 +39,12 @@ class MotionManager {
             var currentPitch: Double = 0.0
             
             switch UIDevice.current.orientation {
-            case .landscapeLeft:
-                currentRoll = rawPitch
-                currentPitch = -rawRoll
-            case .landscapeRight:
-                currentRoll = -rawPitch
-                currentPitch = rawRoll
-            case .portraitUpsideDown:
-                currentRoll = -rawRoll
-                currentPitch = -rawPitch
-            default:
-                currentRoll = rawRoll
-                currentPitch = rawPitch
+            case .landscapeLeft: currentRoll = rawPitch; currentPitch = -rawRoll
+            case .landscapeRight: currentRoll = -rawPitch; currentPitch = rawRoll
+            case .portraitUpsideDown: currentRoll = -rawRoll; currentPitch = -rawPitch
+            default: currentRoll = rawRoll; currentPitch = rawPitch
             }
             
-            // PITCH TARGET LOGIC: Snap to the nearest 90 degrees (0 for flat, 90 for upright)
             let targetPitch = round(currentPitch / 90.0) * 90.0
             let pitchDeviation = currentPitch - targetPitch
             

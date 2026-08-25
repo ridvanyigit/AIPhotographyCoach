@@ -14,29 +14,31 @@ class VoiceCoachManager: NSObject, AVSpeechSynthesizerDelegate {
         try? AVAudioSession.sharedInstance().setActive(true)
     }
     
-    func provideGuidance(framing: FramingAdvice, roll: RollState, pitch: PitchState) {
+    func provideGuidance(framing: FramingAdvice, pose: PoseAdvice, roll: RollState, pitch: PitchState) {
         var phraseToSpeak = ""
         
-        // Priority 1: Framing (Subject position)
+        // Priority 1: Framing (Distance & Position)
         if framing != .perfect && framing != .searching {
             phraseToSpeak = textForFraming(framing)
-        } 
-        // Priority 2: Roll (Left/Right Leveling)
+        }
+        // Priority 2: Subject Pose
+        else if pose != .good && pose != .none && framing == .perfect {
+            phraseToSpeak = textForPose(pose)
+        }
+        // Priority 3: Camera Roll
         else if roll != .aligned && roll != .unknown {
             phraseToSpeak = textForRoll(roll)
         }
-        // Priority 3: Pitch (Up/Down Leveling)
+        // Priority 4: Camera Pitch
         else if pitch != .aligned && pitch != .unknown {
             phraseToSpeak = textForPitch(pitch)
         }
-        // Priority 4: All Perfect
-        else if framing == .perfect && roll == .aligned && pitch == .aligned {
+        // All Perfect
+        else if framing == .perfect && (pose == .good || pose == .none) && roll == .aligned && pitch == .aligned {
             phraseToSpeak = "Perfect. Hold still."
         }
         
-        guard !phraseToSpeak.isEmpty else { return }
-        guard !isSpeaking else { return }
-        guard phraseToSpeak != lastSpokenPhrase else { return } 
+        guard !phraseToSpeak.isEmpty, !isSpeaking, phraseToSpeak != lastSpokenPhrase else { return }
         
         speak(phraseToSpeak)
     }
@@ -61,6 +63,14 @@ class VoiceCoachManager: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
     
+    private func textForPose(_ advice: PoseAdvice) -> String {
+        switch advice {
+        case .faceCamera: return "Look at the camera."
+        case .levelShoulders: return "Keep your shoulders level."
+        default: return ""
+        }
+    }
+    
     private func textForRoll(_ roll: RollState) -> String {
         switch roll {
         case .tiltLeft: return "Tilt phone left."
@@ -77,16 +87,11 @@ class VoiceCoachManager: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
     
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
-        isSpeaking = true
-    }
-    
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) { isSpeaking = true }
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.isSpeaking = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                self.lastSpokenPhrase = ""
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.lastSpokenPhrase = "" }
         }
     }
 }

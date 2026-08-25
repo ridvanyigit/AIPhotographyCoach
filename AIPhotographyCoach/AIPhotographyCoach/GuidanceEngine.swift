@@ -20,31 +20,20 @@ struct OrientationResult {
 }
 
 struct GuidanceEngine {
-    private let rollThreshold: Double = 2.5
-    private let pitchThreshold: Double = 2.5 
+    // INCREASED THRESHOLD: From 2.5 to 3.5 to make it much easier to lock into the "Green" state.
+    private let rollThreshold: Double = 3.5
+    private let pitchThreshold: Double = 3.5 
     
     func evaluate(roll: Double, pitchDeviation: Double) -> OrientationResult {
-        // ROLL (Left / Right)
         let rState: RollState
-        if abs(roll) <= rollThreshold {
-            rState = .aligned
-        } else if roll > 0 {
-            rState = .tiltLeft
-        } else {
-            rState = .tiltRight
-        }
+        if abs(roll) <= rollThreshold { rState = .aligned }
+        else if roll > 0 { rState = .tiltLeft }
+        else { rState = .tiltRight }
         
-        // PITCH (Up / Down)
         let pState: PitchState
-        if abs(pitchDeviation) <= pitchThreshold {
-            pState = .aligned
-        } else if pitchDeviation > 0 {
-            // Positive deviation means camera is looking too far down at the ground
-            pState = .tiltUp
-        } else {
-            // Negative deviation means camera is looking too far up at the sky
-            pState = .tiltDown
-        }
+        if abs(pitchDeviation) <= pitchThreshold { pState = .aligned }
+        else if pitchDeviation > 0 { pState = .tiltUp }
+        else { pState = .tiltDown }
         
         return OrientationResult(roll: rState, pitch: pState)
     }
