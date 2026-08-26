@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import SwiftUI
 import CoreMedia
+import CoreImage
 import ImageIO
 import UIKit
 
@@ -15,12 +16,18 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     var currentBrightness: Double = 0.0
     var currentPosition: AVCaptureDevice.Position = .back
     
+    var selectedFilter: String = "Original"
+    // YENİ: Aktif Portre Işığı Modu
+    var portraitLighting: PortraitLightingMode = .natural
+    var isPortraitActive: Bool = false
+    
     private var isMultiCam: Bool = false
     private var baseZoomFactor: CGFloat = 1.0
     
     private let sessionQueue = DispatchQueue(label: "com.ridvanyigit.CameraSessionQueue")
     private let videoOutput = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
+    private let ciContext = CIContext()
     
     func checkPermission() {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -145,7 +152,6 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
             if self.session.canAddInput(newInput) { self.session.addInput(newInput) } 
             else { self.session.addInput(currentInput) }
             
-            // Ön kameraya geçince zoomu 1.0 yap, arkaya geçince varsayılan 1x eşlemesini yap
             do {
                 try newDevice.lockForConfiguration()
                 if self.currentPosition == .front {
@@ -172,10 +178,7 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
                   let input = self.session.inputs.first as? AVCaptureDeviceInput else { return }
             let device = input.device
             
-            // Ön kamerada zoom sınırını 1.0'da tutuyoruz
-            if self.currentPosition == .front {
-                return
-            }
+            if self.currentPosition == .front { return }
             
             do {
                 try device.lockForConfiguration()
@@ -247,9 +250,125 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     }
     
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard let data = photo.fileDataRepresentation(), let image = UIImage(data: data) else { return }
+        guard let data = photo.fileDataRepresentation(), var image = UIImage(data: data) else { return }
+        
+        // 1. Portre Işığı Efekti Uygula
+        if isPortraitActive, let portraitImage = applyPortraitLighting(to: image, mode: portraitLighting) {
+            image = portraitImage
+        }
+        // 2. Filtre Uygula
+        else if selectedFilter != "Original", let filteredImage = applyFilter(to: image, filterName: selectedFilter) {
+            image = filteredImage
+        }
+        
         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
         DispatchQueue.main.async { self.onPhotoCaptured?(image) }
+    }
+    
+    // CoreImage Portre Işık İşleme Motoru
+    private func applyPortraitLighting(to image: UIImage, mode: PortraitLightingMode) -> UIImage? {
+        guard let ciImage = CIImage(image: image) else { return image }
+        var output = ciImage
+        
+        switch mode {
+        case .natural:
+            break
+        case .studio:
+            if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(output, forKey: kCIInputImageKey)
+                filter.setValue(1.12, forKey: kCIInputBrightnessKey)
+                filter.setValue(1.05, forKey: kCIInputContrastKey)
+                output = filter.outputImage ?? output
+            }
+        case .contour:
+            if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(output, forKey: kCIInputImageKey)
+                filter.setValue(1.22, forKey: kCIInputContrastKey)
+                filter.setValue(1.1, forKey: kCIInputSaturationKey)
+                output = filter.outputImage ?? output
+            }
+            if let vignette = CIFilter(name: "CIVignette") {
+                vignette.setValue(output, forKey: kCIInputImageKey)
+                vignette.setValue(1.5, forKey: kCIInputIntensityKey)
+                vignette.setValue(2.0, forKey: kCIInputRadiusKey)
+                output = vignette.outputImage ?? output
+            }
+        case .stage:
+            if let vignette = CIFilter(name: "CIVignetteEffect") {
+                vignette.setValue(output, forKey: kCIInputImageKey)
+                vignette.setValue(CIVector(x: ciImage.extent.midX, y: ciImage.extent.midY), forKey: kCIInputCenterKey)
+                vignette.setValue(ciImage.extent.width * 0.45, forKey: kCIInputRadiusKey)
+                vignette.setValue(1.0, forKey: kCIInputIntensityKey)
+                output = vignette.outputImage ?? output
+            }
+        case .stageMono:
+            if let mono = CIFilter(name: "CIPhotoEffectMono") {
+                mono.setValue(output, forKey: kCIInputImageKey)
+                output = mono.outputImage ?? output
+            }
+            if let vignette = CIFilter(name: "CIVignetteEffect") {
+                vignette.setValue(output, forKey: kCIInputImageKey)
+                vignette.setValue(CIVector(x: ciImage.extent.midX, y: ciImage.extent.midY), forKey: kCIInputCenterKey)
+                vignette.setValue(ciImage.extent.width * 0.45, forKey: kCIInputRadiusKey)
+                vignette.setValue(1.0, forKey: kCIInputIntensityKey)
+                output = vignette.outputImage ?? output
+            }
+        case .highKeyMono:
+            if let noir = CIFilter(name: "CIPhotoEffectNoir") {
+                noir.setValue(output, forKey: kCIInputImageKey)
+                output = noir.outputImage ?? output
+            }
+            if let boost = CIFilter(name: "CIColorControls") {
+                boost.setValue(output, forKey: kCIInputImageKey)
+                boost.setValue(1.4, forKey: kCIInputContrastKey)
+                boost.setValue(0.1, forKey: kCIInputBrightnessKey)
+                output = boost.outputImage ?? output
+            }
+        }
+        
+        if let cgImage = ciContext.createCGImage(output, from: output.extent) {
+            return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+        }
+        return image
+    }
+    
+    private func applyFilter(to image: UIImage, filterName: String) -> UIImage? {
+        guard let ciImage = CIImage(image: image) else { return image }
+        var outputCIImage: CIImage = ciImage
+        
+        switch filterName {
+        case "Vivid":
+            if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(ciImage, forKey: kCIInputImageKey)
+                filter.setValue(1.35, forKey: kCIInputSaturationKey)
+                filter.setValue(1.08, forKey: kCIInputContrastKey)
+                outputCIImage = filter.outputImage ?? ciImage
+            }
+        case "Warm":
+            if let filter = CIFilter(name: "CITemperatureAndTint") {
+                filter.setValue(ciImage, forKey: kCIInputImageKey)
+                filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+                filter.setValue(CIVector(x: 7600, y: 0), forKey: "inputTargetNeutral")
+                outputCIImage = filter.outputImage ?? ciImage
+            }
+        case "Mono":
+            if let filter = CIFilter(name: "CIPhotoEffectMono") {
+                filter.setValue(ciImage, forKey: kCIInputImageKey)
+                outputCIImage = filter.outputImage ?? ciImage
+            }
+        case "Noir":
+            if let filter = CIFilter(name: "CIPhotoEffectNoir") {
+                filter.setValue(ciImage, forKey: kCIInputImageKey)
+                outputCIImage = filter.outputImage ?? ciImage
+            }
+        default:
+            break
+        }
+        
+        if let cgImage = ciContext.createCGImage(outputCIImage, from: outputCIImage.extent) {
+            return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+        }
+        return image
     }
     
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
