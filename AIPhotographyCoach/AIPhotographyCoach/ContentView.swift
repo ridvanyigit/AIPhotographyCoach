@@ -578,7 +578,7 @@ struct AppleGlassModePicker: View {
             HStack(spacing: 0) {
                 ForEach(0..<modes.count, id: \.self) { i in
                     Text(modes[i])
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 15, weight: .regular, design: .rounded))
                         .foregroundColor(.white)
                         .opacity(isDragging ? 0.6 : (i == selectedIndex ? 0.0 : 0.4))
                         .frame(width: itemWidth)
@@ -608,7 +608,7 @@ struct AppleGlassModePicker: View {
             HStack(spacing: 0) {
                 ForEach(0..<modes.count, id: \.self) { i in
                     Text(modes[i])
-                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
                         .foregroundColor(.yellow)
                         .frame(width: itemWidth)
                 }
