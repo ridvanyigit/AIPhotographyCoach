@@ -38,11 +38,16 @@ struct ContentView: View {
     @State private var isDraggingMode: Bool = false
     @State private var showCategoryMenu: Bool = false
     
-    // PORTRE IŞIĞI VE DİNAMİK SİDEBAR AYARLARI
+    // PORTRE IŞIĞI STATE'LERİ
     @State private var selectedPortraitLighting: PortraitLightingMode = .natural
     @State private var studioBoost: Double = 0.5
     @State private var spotlightRadius: Double = 180.0
     @State private var highKeyExposure: Double = 0.8
+    
+    // SPATIAL 3D STATE'LERİ
+    @State private var selectedSpatial3DMode: Spatial3DMode = .immersive
+    @State private var parallaxIntensity: String = "Mid" // Low / Mid / High
+    @State private var isHoloMeshEnabled: Bool = true
     
     // HIZLI AYAR ÇEKMECESİ STATE'LERİ
     @State private var isQuickSettingsOpen: Bool = false
@@ -76,11 +81,34 @@ struct ContentView: View {
         currentCategory == .human && activeModes[selectedModeIndex] == "PORTRAIT"
     }
     
+    var isSpatial3DMode: Bool {
+        currentCategory == .human && activeModes[selectedModeIndex] == "SPATIAL 3D"
+    }
+    
+    // YENİ: Parallaks Şiddetine Göre Anlık Canlı Kayma Pikseli
+    private var currentParallaxOffset: CGFloat {
+        switch parallaxIntensity {
+        case "Low": return 2.5
+        case "High": return 9.0
+        default: return 5.0 // Mid
+        }
+    }
+    
+    private var currentParallaxOpacity: Double {
+        switch parallaxIntensity {
+        case "Low": return 0.09
+        case "High": return 0.22
+        default: return 0.15
+        }
+    }
+    
     // Filtre GPU Değerleri
     private var filterSaturation: Double {
         if isPortraitMode {
             if selectedPortraitLighting == .stageMono || selectedPortraitLighting == .highKeyMono { return 0.0 }
             if selectedPortraitLighting == .contour { return 1.15 }
+        } else if isSpatial3DMode && selectedSpatial3DMode == .holoMesh {
+            return 1.25
         }
         switch selectedFilter {
         case "Vivid": return 1.35
@@ -93,6 +121,8 @@ struct ContentView: View {
         if isPortraitMode {
             if selectedPortraitLighting == .highKeyMono { return 1.4 }
             if selectedPortraitLighting == .contour || selectedPortraitLighting == .stageMono { return 1.25 }
+        } else if isSpatial3DMode && selectedSpatial3DMode == .holoMesh {
+            return 1.15
         }
         switch selectedFilter {
         case "Vivid": return 1.06
@@ -119,6 +149,9 @@ struct ContentView: View {
     }
     
     private var filterColorMultiply: Color {
+        if isSpatial3DMode && selectedSpatial3DMode == .holoMesh {
+            return Color(red: 0.88, green: 1.0, blue: 1.0)
+        }
         switch selectedFilter {
         case "Warm": return Color(red: 1.05, green: 0.98, blue: 0.92)
         default: return .white
@@ -166,8 +199,15 @@ struct ContentView: View {
                                 }
                         )
                     
-                    // 2. PORTRE IŞIĞI CANLI SHADER KATMANI
+                    // 2. PORTRE & SPATIAL 3D CANLI SHADER KATMANLARI
                     portraitLightingLiveOverlay
+                        .ignoresSafeArea()
+                    
+                    spatial3DLiveOverlay
+                        .ignoresSafeArea()
+                    
+                    // YENİ: Canlı 3D Mesh / LiDAR Görsel Katmanı
+                    spatialMeshLiveOverlay
                         .ignoresSafeArea()
                     
                     CompositionGridView()
@@ -186,11 +226,18 @@ struct ContentView: View {
                             .animation(.spring(), value: showFocusRect)
                     }
                     
-                    // 3. ÜST ROZETLER (Tamamen Temiz & Sade Arayüz)
-                    VStack(spacing: 12) {
+                    // 3. ÜST ROZETLER + SPATIAL 3D MESAFE ROZETİ
+                    VStack(spacing: 10) {
                         CoachingBadgeView(framingAdvice: visionManager.framingAdvice, poseAdvice: visionManager.poseAdvice)
                             .padding(.top, 20)
-                        LightingBadgeView(condition: lightingCoach.evaluate(brightness: cameraManager.currentBrightness))
+                        
+                        if isSpatial3DMode {
+                            spatialDistanceBadge
+                                .transition(.scale.combined(with: .opacity))
+                        } else {
+                            LightingBadgeView(condition: lightingCoach.evaluate(brightness: cameraManager.currentBrightness))
+                        }
+                        
                         Spacer()
                     }
                     
@@ -217,7 +264,7 @@ struct ContentView: View {
                                 Button(action: { withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { isSidebarOpen.toggle() } }) {
                                     Image(systemName: "gearshape.fill")
                                         .font(.system(size: 32))
-                                        .foregroundColor(isSidebarOpen ? .yellow : .white.opacity(0.9))
+                                        .foregroundColor(isSidebarOpen ? (isSpatial3DMode ? .cyan : .yellow) : .white.opacity(0.9))
                                         .shadow(color: .black.opacity(0.6), radius: 4)
                                         .rotationEffect(.degrees(gearAngle))
                                 }
@@ -243,7 +290,7 @@ struct ContentView: View {
                                 .padding(.bottom, 10)
                         }
                         
-                        // PORTRE MODUNDA APPLE DİREKSİYON / IŞIK ÇARKI
+                        // A. PORTRE MODUNDA: PORTRAIT LIGHTING DIAL
                         if isPortraitMode {
                             PortraitLightingDialView(selectedMode: $selectedPortraitLighting)
                                 .padding(.bottom, 10)
@@ -251,8 +298,18 @@ struct ContentView: View {
                                 .onChange(of: selectedPortraitLighting) { _, newLight in
                                     cameraManager.portraitLighting = newLight
                                 }
-                        } else if cameraManager.currentPosition == .back {
-                            // ZOOM BUTONLARI
+                        }
+                        // B. SPATIAL 3D MODUNDA: SPATIAL 3D DIAL
+                        else if isSpatial3DMode {
+                            Spatial3DDialView(selectedMode: $selectedSpatial3DMode)
+                                .padding(.bottom, 10)
+                                .transition(.scale(scale: 0.9).combined(with: .opacity))
+                                .onChange(of: selectedSpatial3DMode) { _, newSpatial in
+                                    cameraManager.spatial3DMode = newSpatial
+                                }
+                        }
+                        // C. DİĞER MODLARDA: STANDART ZOOM BUTONLARI
+                        else if cameraManager.currentPosition == .back {
                             HStack(spacing: 12) {
                                 ForEach([0.5, 1.0, 2.0, 3.0], id: \.self) { zoom in
                                     let isSelected = (selectedZoom == zoom)
@@ -424,6 +481,14 @@ struct ContentView: View {
                 cameraManager.isPortraitActive = active
                 cameraManager.portraitLighting = selectedPortraitLighting
             }
+            .onChange(of: isSpatial3DMode) { _, active in
+                cameraManager.isSpatial3DActive = active
+                cameraManager.spatial3DMode = selectedSpatial3DMode
+                cameraManager.parallaxIntensity = parallaxIntensity
+            }
+            .onChange(of: parallaxIntensity) { _, newIntensity in
+                cameraManager.parallaxIntensity = newIntensity
+            }
             .onChange(of: visionManager.framingAdvice) { _, _ in triggerVoiceCoach() }
             .onChange(of: visionManager.poseAdvice) { _, _ in triggerVoiceCoach() }
             .onChange(of: motionManager.currentRollState) { _, _ in triggerVoiceCoach() }
@@ -431,7 +496,166 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - PORTRE IŞIKLARI CANLI SHADER KATMANI
+    // MARK: - Spatial 3D Canlı Görsel Efekt Katmanı (Parallaks Şiddetine Bağlı)
+    @ViewBuilder
+    private var spatial3DLiveOverlay: some View {
+        if isSpatial3DMode {
+            switch selectedSpatial3DMode {
+            case .anaglyph:
+                // Canlı Kırmızı-Cyan 3D Sinema Katmanı (Parallax Şiddetiyle Genişler/Daralır)
+                ZStack {
+                    Color.red.opacity(currentParallaxOpacity).blendMode(.screen)
+                        .offset(x: -currentParallaxOffset, y: 0)
+                    Color.cyan.opacity(currentParallaxOpacity).blendMode(.screen)
+                        .offset(x: currentParallaxOffset, y: 0)
+                }
+                .allowsHitTesting(false)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: currentParallaxOffset)
+                
+            case .visionPro:
+                RoundedRectangle(cornerRadius: 44, style: .continuous)
+                    .stroke(Color.white.opacity(0.4), lineWidth: 2)
+                    .padding(24)
+                    .shadow(color: .cyan.opacity(0.4), radius: 15)
+                    .allowsHitTesting(false)
+                
+            case .focusedDepth:
+                RadialGradient(
+                    gradient: Gradient(colors: [Color.clear, Color.black.opacity(0.45)]),
+                    center: .center,
+                    startRadius: 150,
+                    endRadius: 360
+                )
+                .allowsHitTesting(false)
+                
+            default:
+                EmptyView()
+            }
+        }
+    }
+    
+    // MARK: - YENİ: Canlı 3D Holo Mesh / LiDAR Koordinat Katmanı (Mesh / Clean Reaksiyonu)
+    @ViewBuilder
+    private var spatialMeshLiveOverlay: some View {
+        if isSpatial3DMode && isHoloMeshEnabled {
+            GeometryReader { geo in
+                ZStack {
+                    // 1. Algılanan İnsan/Yüz Üzerinde 3D Siber Mesh ve Köşe Retikülleri
+                    ForEach(0..<visionManager.detectedFaces.count, id: \.self) { idx in
+                        let face = visionManager.detectedFaces[idx]
+                        let w = face.width * geo.size.width
+                        let h = face.height * geo.size.height
+                        let x = face.minX * geo.size.width
+                        let y = (1 - face.minY - face.height) * geo.size.height
+                        
+                        ZStack(alignment: .topLeading) {
+                            // Kesikli 3D Kafes Çerçevesi
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.cyan.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                            
+                            // Yatay 3D Tarama Lazer Çizgisi
+                            Rectangle()
+                                .fill(LinearGradient(colors: [.clear, Color.cyan.opacity(0.7), .clear], startPoint: .leading, endPoint: .trailing))
+                                .frame(height: 2)
+                                .offset(y: h * 0.45)
+                            
+                            // 3D Köşe Hedefleri
+                            Path { p in
+                                p.move(to: CGPoint(x: 0, y: 14)); p.addLine(to: CGPoint(x: 0, y: 0)); p.addLine(to: CGPoint(x: 14, y: 0))
+                                p.move(to: CGPoint(x: w - 14, y: 0)); p.addLine(to: CGPoint(x: w, y: 0)); p.addLine(to: CGPoint(x: w, y: 14))
+                                p.move(to: CGPoint(x: 0, y: h - 14)); p.addLine(to: CGPoint(x: 0, y: h)); p.addLine(to: CGPoint(x: 14, y: h))
+                                p.move(to: CGPoint(x: w - 14, y: h)); p.addLine(to: CGPoint(x: w, y: h)); p.addLine(to: CGPoint(x: w, y: h - 14))
+                            }
+                            .stroke(Color.cyan, lineWidth: 2.5)
+                            
+                            // Z-Derinlik Etiketi
+                            HStack(spacing: 3) {
+                                Image(systemName: "cube.transparent.fill")
+                                    .font(.system(size: 8))
+                                Text("3D DEPTH: \(parallaxIntensity.uppercased())")
+                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.cyan)
+                            .cornerRadius(4)
+                            .offset(x: 4, y: -20)
+                        }
+                        .frame(width: w, height: h)
+                        .position(x: x + w/2, y: y + h/2)
+                    }
+                    
+                    // 2. İnsan Henüz Yokken Canlı LiDAR Zemin Tarama Göstergesi
+                    if visionManager.detectedFaces.isEmpty {
+                        VStack {
+                            Spacer()
+                            HStack(spacing: 10) {
+                                Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                                    .font(.system(size: 13))
+                                Text("3D MESH SCANNING: \(parallaxIntensity.uppercased())")
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(.cyan)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.cyan.opacity(0.5), lineWidth: 1))
+                            .padding(.bottom, 220)
+                        }
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
+    
+    // MARK: - Spatial 3D Canlı Mesafe ve Derinlik Rozeti
+    private var spatialDistanceBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "cube.transparent")
+                .font(.system(size: 11, weight: .bold))
+            
+            Text(distanceText)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(distanceColor.opacity(0.85))
+        .background(.ultraThinMaterial)
+        .foregroundColor(.white)
+        .clipShape(Capsule())
+        .shadow(color: distanceColor.opacity(0.5), radius: 6)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: distanceText)
+    }
+    
+    private var distanceText: String {
+        guard let face = visionManager.detectedFaces.first else {
+            return "3D Depth: Searching..."
+        }
+        let w = face.width
+        if w > 0.38 {
+            return "3D: Step Back (Too Close)"
+        } else if w < 0.14 {
+            return "3D: Move Closer (Too Far)"
+        } else {
+            return "1.8m — Optimal 3D Range ✨"
+        }
+    }
+    
+    private var distanceColor: Color {
+        guard let face = visionManager.detectedFaces.first else { return Color.black.opacity(0.5) }
+        let w = face.width
+        if w >= 0.14 && w <= 0.38 {
+            return Color.cyan
+        } else {
+            return Color.orange
+        }
+    }
+    
+    // MARK: - Portre Işıkları Canlı Shader Katmanı
     @ViewBuilder
     private var portraitLightingLiveOverlay: some View {
         if isPortraitMode {
@@ -474,11 +698,11 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - SEÇİLİ PORTRE IŞIĞINA GÖRE DİNAMİK SİDEBAR İÇERİĞİ
+    // MARK: - DİNAMİK SİDEBAR İÇERİĞİ
     @ViewBuilder
     private var dynamicSidebarContent: some View {
         VStack(spacing: 20) {
-            // 1. AUTO CAPTURE BUTONU
+            // 1. AUTO CAPTURE
             Button(action: { withAnimation { isAutoCaptureEnabled.toggle() } }) {
                 VStack(spacing: 4) {
                     Image(systemName: isAutoCaptureEnabled ? "a.circle.fill" : "a.circle")
@@ -486,16 +710,51 @@ struct ContentView: View {
                     Text("Auto")
                         .font(.system(size: 9, weight: .bold))
                 }
-                .foregroundColor(isAutoCaptureEnabled ? .yellow : .white)
+                .foregroundColor(isAutoCaptureEnabled ? (isSpatial3DMode ? .cyan : .yellow) : .white)
             }
             
-            // 2. IŞIK MODUNA ÖZEL DİNAMİK BUTONLAR
-            if isPortraitMode {
+            // 2. SPATIAL 3D ÖZEL SİDEBAR BUTONLARI (Canlı Reaktif)
+            if isSpatial3DMode {
+                Divider().background(Color.white.opacity(0.2)).frame(width: 36)
+                
+                // Parallaks Şiddeti Butonu (Low / Mid / High)
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                        cycleParallax()
+                    }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "square.3.layers.3d.down.right")
+                            .font(.system(size: 22))
+                        Text(parallaxIntensity)
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(.cyan)
+                }
+                
+                // 3D Holo Mesh Aç/Kapat Butonu (Mesh / Clean)
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                        isHoloMeshEnabled.toggle()
+                    }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: isHoloMeshEnabled ? "cube.transparent.fill" : "cube.transparent")
+                            .font(.system(size: 22))
+                        Text(isHoloMeshEnabled ? "Mesh" : "Clean")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(isHoloMeshEnabled ? .cyan : .white.opacity(0.6))
+                }
+            }
+            // 3. PORTRE MODU SİDEBAR BUTONLARI
+            else if isPortraitMode {
                 Divider().background(Color.white.opacity(0.2)).frame(width: 36)
                 
                 switch selectedPortraitLighting {
                 case .natural:
-                    // Diyafram (f) Kontrolü (Artık Sadece Sidebar'da)
                     Button(action: { cycleAperture(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }) {
                         VStack(spacing: 4) {
                             Image(systemName: "f.cursive.circle.fill")
@@ -505,7 +764,6 @@ struct ContentView: View {
                         }
                         .foregroundColor(.yellow)
                     }
-                    // Pose AI Kontrolü
                     Button(action: { isPoseAIOpen.toggle(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }) {
                         VStack(spacing: 4) {
                             Image(systemName: isPoseAIOpen ? "figure.stand" : "figure.stand.line.dotted.figure.stand")
@@ -517,7 +775,6 @@ struct ContentView: View {
                     }
                     
                 case .studio:
-                    // Stüdyo Işık Güçlendirici
                     Button(action: {
                         studioBoost = (studioBoost == 0.5 ? 1.0 : 0.5)
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -532,7 +789,6 @@ struct ContentView: View {
                     }
                     
                 case .contour:
-                    // Kontur Derinlik Tonu
                     Button(action: {
                         exposureValue = (exposureValue == 0.0 ? -0.7 : 0.0)
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -547,7 +803,6 @@ struct ContentView: View {
                     }
                     
                 case .stage, .stageMono:
-                    // Sahne Spot Işığı Çapı
                     Button(action: {
                         spotlightRadius = (spotlightRadius == 180.0 ? 120.0 : (spotlightRadius == 120.0 ? 220.0 : 180.0))
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -562,7 +817,6 @@ struct ContentView: View {
                     }
                     
                 case .highKeyMono:
-                    // High-Key Parlaklık
                     Button(action: {
                         highKeyExposure = (highKeyExposure == 0.8 ? 1.4 : 0.8)
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -740,6 +994,12 @@ struct ContentView: View {
         let filters = ["Original", "Vivid", "Warm", "Mono", "Noir"]
         if let idx = filters.firstIndex(of: selectedFilter) { selectedFilter = filters[(idx + 1) % filters.count] }
     }
+    private func cycleParallax() {
+        let levels = ["Low", "Mid", "High"]
+        if let idx = levels.firstIndex(of: parallaxIntensity) {
+            parallaxIntensity = levels[(idx + 1) % levels.count]
+        }
+    }
     
     private func triggerVoiceCoach() {
         voiceCoach.provideGuidance(framing: visionManager.framingAdvice, pose: visionManager.poseAdvice, roll: motionManager.currentRollState, pitch: motionManager.currentPitchState)
@@ -837,7 +1097,6 @@ struct AppleGlassModePicker: View {
     
     var body: some View {
         ZStack {
-            // KATMAN 1: ARKA PLAN YAZILARI
             HStack(spacing: 0) {
                 ForEach(0..<modes.count, id: \.self) { i in
                     Text(modes[i])
@@ -861,7 +1120,6 @@ struct AppleGlassModePicker: View {
                 )
             )
 
-            // KATMAN 2: CAM KAPSÜL
             Capsule()
                 .fill(.ultraThinMaterial)
                 .opacity(0.85)
@@ -869,12 +1127,11 @@ struct AppleGlassModePicker: View {
                 .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                 .frame(width: 120, height: 44)
 
-            // KATMAN 3: SARI YAZI
             HStack(spacing: 0) {
                 ForEach(0..<modes.count, id: \.self) { i in
                     Text(modes[i])
                         .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundColor(.yellow)
+                        .foregroundColor(modes[i] == "SPATIAL 3D" ? .cyan : .yellow)
                         .frame(width: itemWidth)
                 }
             }

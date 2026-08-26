@@ -17,9 +17,15 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     var currentPosition: AVCaptureDevice.Position = .back
     
     var selectedFilter: String = "Original"
-    // YENİ: Aktif Portre Işığı Modu
+    
+    // PORTRE MODU KONTROLLERİ
     var portraitLighting: PortraitLightingMode = .natural
     var isPortraitActive: Bool = false
+    
+    // SPATIAL 3D MODU KONTROLLERİ
+    var spatial3DMode: Spatial3DMode = .immersive
+    var isSpatial3DActive: Bool = false
+    var parallaxIntensity: String = "Mid" // YENİ: Fotoğraf kaydına bağlanan şiddet
     
     private var isMultiCam: Bool = false
     private var baseZoomFactor: CGFloat = 1.0
@@ -252,11 +258,15 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard let data = photo.fileDataRepresentation(), var image = UIImage(data: data) else { return }
         
-        // 1. Portre Işığı Efekti Uygula
-        if isPortraitActive, let portraitImage = applyPortraitLighting(to: image, mode: portraitLighting) {
+        // 1. SPATIAL 3D EFECTLERİ UYGULA (Parallaks Şiddetine Göre)
+        if isSpatial3DActive, let spatialImage = applySpatial3DEffect(to: image, mode: spatial3DMode) {
+            image = spatialImage
+        }
+        // 2. PORTRE IŞIĞI UYGULA
+        else if isPortraitActive, let portraitImage = applyPortraitLighting(to: image, mode: portraitLighting) {
             image = portraitImage
         }
-        // 2. Filtre Uygula
+        // 3. FİLTRE UYGULA
         else if selectedFilter != "Original", let filteredImage = applyFilter(to: image, filterName: selectedFilter) {
             image = filteredImage
         }
@@ -265,14 +275,48 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
         DispatchQueue.main.async { self.onPhotoCaptured?(image) }
     }
     
-    // CoreImage Portre Işık İşleme Motoru
+    // Spatial 3D Fotoğraf Efekt Motoru (Parallaks Şiddetiyle Bütünleşik)
+    private func applySpatial3DEffect(to image: UIImage, mode: Spatial3DMode) -> UIImage? {
+        guard let ciImage = CIImage(image: image) else { return image }
+        var output = ciImage
+        
+        switch mode {
+        case .anaglyph:
+            let shiftFactor: Double = (parallaxIntensity == "High" ? 1.35 : (parallaxIntensity == "Low" ? 0.75 : 1.05))
+            if let redFilter = CIFilter(name: "CIColorMatrix") {
+                redFilter.setValue(output, forKey: kCIInputImageKey)
+                redFilter.setValue(CIVector(x: shiftFactor, y: 0.1, z: 0.1, w: 0), forKey: "inputRVector")
+                redFilter.setValue(CIVector(x: 0, y: 0.9, z: shiftFactor, w: 0), forKey: "inputGVector")
+                redFilter.setValue(CIVector(x: 0, y: 0.9, z: shiftFactor, w: 0), forKey: "inputBVector")
+                output = redFilter.outputImage ?? output
+            }
+        case .holoMesh:
+            if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(output, forKey: kCIInputImageKey)
+                filter.setValue(1.3, forKey: kCIInputContrastKey)
+                filter.setValue(1.15, forKey: kCIInputSaturationKey)
+                output = filter.outputImage ?? output
+            }
+        case .visionPro, .immersive, .focusedDepth:
+            if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(output, forKey: kCIInputImageKey)
+                filter.setValue(1.05, forKey: kCIInputContrastKey)
+                output = filter.outputImage ?? output
+            }
+        }
+        
+        if let cgImage = ciContext.createCGImage(output, from: output.extent) {
+            return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+        }
+        return image
+    }
+    
     private func applyPortraitLighting(to image: UIImage, mode: PortraitLightingMode) -> UIImage? {
         guard let ciImage = CIImage(image: image) else { return image }
         var output = ciImage
         
         switch mode {
-        case .natural:
-            break
+        case .natural: break
         case .studio:
             if let filter = CIFilter(name: "CIColorControls") {
                 filter.setValue(output, forKey: kCIInputImageKey)
@@ -284,14 +328,7 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
             if let filter = CIFilter(name: "CIColorControls") {
                 filter.setValue(output, forKey: kCIInputImageKey)
                 filter.setValue(1.22, forKey: kCIInputContrastKey)
-                filter.setValue(1.1, forKey: kCIInputSaturationKey)
                 output = filter.outputImage ?? output
-            }
-            if let vignette = CIFilter(name: "CIVignette") {
-                vignette.setValue(output, forKey: kCIInputImageKey)
-                vignette.setValue(1.5, forKey: kCIInputIntensityKey)
-                vignette.setValue(2.0, forKey: kCIInputRadiusKey)
-                output = vignette.outputImage ?? output
             }
         case .stage:
             if let vignette = CIFilter(name: "CIVignetteEffect") {
@@ -306,23 +343,10 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
                 mono.setValue(output, forKey: kCIInputImageKey)
                 output = mono.outputImage ?? output
             }
-            if let vignette = CIFilter(name: "CIVignetteEffect") {
-                vignette.setValue(output, forKey: kCIInputImageKey)
-                vignette.setValue(CIVector(x: ciImage.extent.midX, y: ciImage.extent.midY), forKey: kCIInputCenterKey)
-                vignette.setValue(ciImage.extent.width * 0.45, forKey: kCIInputRadiusKey)
-                vignette.setValue(1.0, forKey: kCIInputIntensityKey)
-                output = vignette.outputImage ?? output
-            }
         case .highKeyMono:
             if let noir = CIFilter(name: "CIPhotoEffectNoir") {
                 noir.setValue(output, forKey: kCIInputImageKey)
                 output = noir.outputImage ?? output
-            }
-            if let boost = CIFilter(name: "CIColorControls") {
-                boost.setValue(output, forKey: kCIInputImageKey)
-                boost.setValue(1.4, forKey: kCIInputContrastKey)
-                boost.setValue(0.1, forKey: kCIInputBrightnessKey)
-                output = boost.outputImage ?? output
             }
         }
         
@@ -361,8 +385,7 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
                 filter.setValue(ciImage, forKey: kCIInputImageKey)
                 outputCIImage = filter.outputImage ?? ciImage
             }
-        default:
-            break
+        default: break
         }
         
         if let cgImage = ciContext.createCGImage(outputCIImage, from: outputCIImage.extent) {
