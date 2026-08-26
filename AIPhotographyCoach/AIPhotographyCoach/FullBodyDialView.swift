@@ -1,8 +1,8 @@
 import SwiftUI
 
-// MARK: - Apple Pano Mod Seçim Çarkı (Gün Batımı Amber Tonu)
-struct PanoDialView: View {
-    @Binding var selectedMode: PanoMode
+// MARK: - Apple Full Body Mod Seçim Çarkı (Moda Moru - Ultra Violet Akışı)
+struct FullBodyDialView: View {
+    @Binding var selectedMode: FullBodyMode
     
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging: Bool = false
@@ -11,9 +11,9 @@ struct PanoDialView: View {
     private let itemWidth: CGFloat = 72
     private let containerWidth: CGFloat = 300
     private let feedback = UISelectionFeedbackGenerator()
-    private let amberColor = Color(red: 1.0, green: 0.55, blue: 0.1) // Amber / Sunset Orange
+    private let violetColor = Color(red: 0.78, green: 0.42, blue: 1.0) // Moda Moru
     
-    private var allModes: [PanoMode] { PanoMode.allCases }
+    private var allModes: [FullBodyMode] { FullBodyMode.allCases }
     private var selectedIndex: Int { allModes.firstIndex(of: selectedMode) ?? 0 }
     
     private var currentVirtualCenter: CGFloat {
@@ -31,12 +31,14 @@ struct PanoDialView: View {
     
     var body: some View {
         VStack(spacing: 4) {
+            // 1. CANLI GÜNCELLENEN BAŞLIK
             Text(allModes[liveTitleIndex].rawValue)
                 .font(.system(size: 11, weight: .black, design: .rounded))
-                .foregroundColor(amberColor)
-                .shadow(color: amberColor.opacity(0.8), radius: 3)
+                .foregroundColor(violetColor)
+                .shadow(color: violetColor.opacity(0.8), radius: 4)
                 .animation(.easeInOut(duration: 0.15), value: liveTitleIndex)
             
+            // 2. KAVİSLİ DİREKSİYON TEKERLEĞİ
             ZStack {
                 ForEach(0..<allModes.count, id: \.self) { i in
                     let mode = allModes[i]
@@ -56,15 +58,15 @@ struct PanoDialView: View {
                             .overlay(
                                 Circle()
                                     .stroke(
-                                        isFocused ? amberColor : Color.white.opacity(0.25),
+                                        isFocused ? violetColor : Color.white.opacity(0.25),
                                         lineWidth: isFocused ? 2.0 : 1.0
                                     )
                             )
-                            .shadow(color: isFocused ? amberColor.opacity(0.6) : Color.clear, radius: 8)
+                            .shadow(color: isFocused ? violetColor.opacity(0.6) : Color.clear, radius: 8)
                         
                         Image(systemName: mode.iconName)
                             .font(.system(size: 18, weight: isFocused ? .bold : .regular))
-                            .foregroundColor(isFocused ? amberColor : .white.opacity(0.75))
+                            .foregroundColor(isFocused ? violetColor : .white.opacity(0.75))
                     }
                     .scaleEffect(scale)
                     .opacity(opacity)
