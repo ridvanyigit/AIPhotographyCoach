@@ -46,8 +46,12 @@ struct ContentView: View {
     
     // SPATIAL 3D STATE'LERİ
     @State private var selectedSpatial3DMode: Spatial3DMode = .immersive
-    @State private var parallaxIntensity: String = "Mid" // Low / Mid / High
+    @State private var parallaxIntensity: String = "Mid"
     @State private var isHoloMeshEnabled: Bool = true
+    
+    // PANO MODU STATE'LERİ
+    @State private var selectedPanoMode: PanoMode = .wideGroup
+    @State private var panoDirection: PanoDirection = .leftToRight
     
     // HIZLI AYAR ÇEKMECESİ STATE'LERİ
     @State private var isQuickSettingsOpen: Bool = false
@@ -85,12 +89,15 @@ struct ContentView: View {
         currentCategory == .human && activeModes[selectedModeIndex] == "SPATIAL 3D"
     }
     
-    // YENİ: Parallaks Şiddetine Göre Anlık Canlı Kayma Pikseli
+    var isPanoMode: Bool {
+        currentCategory == .human && activeModes[selectedModeIndex] == "PANO"
+    }
+    
     private var currentParallaxOffset: CGFloat {
         switch parallaxIntensity {
         case "Low": return 2.5
         case "High": return 9.0
-        default: return 5.0 // Mid
+        default: return 5.0
         }
     }
     
@@ -206,7 +213,6 @@ struct ContentView: View {
                     spatial3DLiveOverlay
                         .ignoresSafeArea()
                     
-                    // YENİ: Canlı 3D Mesh / LiDAR Görsel Katmanı
                     spatialMeshLiveOverlay
                         .ignoresSafeArea()
                     
@@ -226,7 +232,7 @@ struct ContentView: View {
                             .animation(.spring(), value: showFocusRect)
                     }
                     
-                    // 3. ÜST ROZETLER + SPATIAL 3D MESAFE ROZETİ
+                    // 3. ÜST ROZETLER
                     VStack(spacing: 10) {
                         CoachingBadgeView(framingAdvice: visionManager.framingAdvice, poseAdvice: visionManager.poseAdvice)
                             .padding(.top, 20)
@@ -241,15 +247,26 @@ struct ContentView: View {
                         Spacer()
                     }
                     
-                    GuidanceView(
-                        roll: motionManager.smoothedRoll,
-                        pitchDeviation: motionManager.smoothedPitchDeviation,
-                        rollState: motionManager.currentRollState,
-                        pitchState: motionManager.currentPitchState,
-                        hasFace: !visionManager.detectedFaces.isEmpty
-                    )
+                    // 4. REHBERLİK (PANO MODUNDA KILAVUZ HESABI)
+                    if isPanoMode {
+                        PanoGuidanceView(
+                            mode: selectedPanoMode,
+                            direction: $panoDirection,
+                            pitchDeviation: motionManager.smoothedPitchDeviation,
+                            angularVelocity: motionManager.currentAngularVelocity
+                        )
+                        .transition(.scale.combined(with: .opacity))
+                    } else {
+                        GuidanceView(
+                            roll: motionManager.smoothedRoll,
+                            pitchDeviation: motionManager.smoothedPitchDeviation,
+                            rollState: motionManager.currentRollState,
+                            pitchState: motionManager.currentPitchState,
+                            hasFace: !visionManager.detectedFaces.isEmpty
+                        )
+                    }
                     
-                    // 4. SAĞ YAN MENÜ: DİNAMİK SİDEBAR
+                    // 5. SAĞ YAN MENÜ: DİNAMİK SİDEBAR
                     HStack {
                         Spacer()
                         VStack {
@@ -280,7 +297,7 @@ struct ContentView: View {
                         .padding(.trailing, 20)
                     }
                     
-                    // 5. ALT KONTROL PANELİ
+                    // 6. ALT KONTROL PANELİ
                     VStack(spacing: 0) {
                         Spacer()
                         
@@ -308,7 +325,13 @@ struct ContentView: View {
                                     cameraManager.spatial3DMode = newSpatial
                                 }
                         }
-                        // C. DİĞER MODLARDA: STANDART ZOOM BUTONLARI
+                        // C. PANO MODUNDA: PANO DIAL
+                        else if isPanoMode {
+                            PanoDialView(selectedMode: $selectedPanoMode)
+                                .padding(.bottom, 10)
+                                .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        }
+                        // D. DİĞER MODLARDA: STANDART ZOOM BUTONLARI
                         else if cameraManager.currentPosition == .back {
                             HStack(spacing: 12) {
                                 ForEach([0.5, 1.0, 2.0, 3.0], id: \.self) { zoom in
@@ -496,13 +519,12 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - Spatial 3D Canlı Görsel Efekt Katmanı (Parallaks Şiddetine Bağlı)
+    // MARK: - Spatial 3D Canlı Görsel Efekt Katmanı
     @ViewBuilder
     private var spatial3DLiveOverlay: some View {
         if isSpatial3DMode {
             switch selectedSpatial3DMode {
             case .anaglyph:
-                // Canlı Kırmızı-Cyan 3D Sinema Katmanı (Parallax Şiddetiyle Genişler/Daralır)
                 ZStack {
                     Color.red.opacity(currentParallaxOpacity).blendMode(.screen)
                         .offset(x: -currentParallaxOffset, y: 0)
@@ -534,13 +556,12 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - YENİ: Canlı 3D Holo Mesh / LiDAR Koordinat Katmanı (Mesh / Clean Reaksiyonu)
+    // MARK: - Canlı 3D Holo Mesh Katmanı
     @ViewBuilder
     private var spatialMeshLiveOverlay: some View {
         if isSpatial3DMode && isHoloMeshEnabled {
             GeometryReader { geo in
                 ZStack {
-                    // 1. Algılanan İnsan/Yüz Üzerinde 3D Siber Mesh ve Köşe Retikülleri
                     ForEach(0..<visionManager.detectedFaces.count, id: \.self) { idx in
                         let face = visionManager.detectedFaces[idx]
                         let w = face.width * geo.size.width
@@ -549,17 +570,14 @@ struct ContentView: View {
                         let y = (1 - face.minY - face.height) * geo.size.height
                         
                         ZStack(alignment: .topLeading) {
-                            // Kesikli 3D Kafes Çerçevesi
                             RoundedRectangle(cornerRadius: 12)
                                 .stroke(Color.cyan.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                             
-                            // Yatay 3D Tarama Lazer Çizgisi
                             Rectangle()
                                 .fill(LinearGradient(colors: [.clear, Color.cyan.opacity(0.7), .clear], startPoint: .leading, endPoint: .trailing))
                                 .frame(height: 2)
                                 .offset(y: h * 0.45)
                             
-                            // 3D Köşe Hedefleri
                             Path { p in
                                 p.move(to: CGPoint(x: 0, y: 14)); p.addLine(to: CGPoint(x: 0, y: 0)); p.addLine(to: CGPoint(x: 14, y: 0))
                                 p.move(to: CGPoint(x: w - 14, y: 0)); p.addLine(to: CGPoint(x: w, y: 0)); p.addLine(to: CGPoint(x: w, y: 14))
@@ -568,7 +586,6 @@ struct ContentView: View {
                             }
                             .stroke(Color.cyan, lineWidth: 2.5)
                             
-                            // Z-Derinlik Etiketi
                             HStack(spacing: 3) {
                                 Image(systemName: "cube.transparent.fill")
                                     .font(.system(size: 8))
@@ -586,7 +603,6 @@ struct ContentView: View {
                         .position(x: x + w/2, y: y + h/2)
                     }
                     
-                    // 2. İnsan Henüz Yokken Canlı LiDAR Zemin Tarama Göstergesi
                     if visionManager.detectedFaces.isEmpty {
                         VStack {
                             Spacer()
@@ -612,7 +628,7 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - Spatial 3D Canlı Mesafe ve Derinlik Rozeti
+    // MARK: - Spatial 3D Mesafe Rozeti
     private var spatialDistanceBadge: some View {
         HStack(spacing: 6) {
             Image(systemName: "cube.transparent")
@@ -698,7 +714,7 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - DİNAMİK SİDEBAR İÇERİĞİ
+    // MARK: - DİNAMİK SİDEBAR İÇERİĞİ (Pano, Spatial 3D ve Portre Uyumlu)
     @ViewBuilder
     private var dynamicSidebarContent: some View {
         VStack(spacing: 20) {
@@ -713,11 +729,44 @@ struct ContentView: View {
                 .foregroundColor(isAutoCaptureEnabled ? (isSpatial3DMode ? .cyan : .yellow) : .white)
             }
             
-            // 2. SPATIAL 3D ÖZEL SİDEBAR BUTONLARI (Canlı Reaktif)
-            if isSpatial3DMode {
+            // 2. PANO MODU ÖZEL SİDEBAR BUTONLARI
+            if isPanoMode {
                 Divider().background(Color.white.opacity(0.2)).frame(width: 36)
                 
-                // Parallaks Şiddeti Butonu (Low / Mid / High)
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        panoDirection = (panoDirection == .leftToRight ? .rightToLeft : .leftToRight)
+                    }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: panoDirection == .leftToRight ? "arrow.right.circle.fill" : "arrow.left.circle.fill")
+                            .font(.system(size: 22))
+                        Text(panoDirection == .leftToRight ? "L ➔ R" : "R ➔ L")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(.yellow)
+                }
+                
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        selectedPanoMode = (selectedPanoMode == .vertorama ? .wideGroup : .vertorama)
+                    }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: selectedPanoMode == .vertorama ? "arrow.up.and.down.square.fill" : "pano.fill")
+                            .font(.system(size: 22))
+                        Text(selectedPanoMode == .vertorama ? "Vert" : "Hori")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(.yellow)
+                }
+            }
+            // 3. SPATIAL 3D ÖZEL SİDEBAR BUTONLARI
+            else if isSpatial3DMode {
+                Divider().background(Color.white.opacity(0.2)).frame(width: 36)
+                
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                         cycleParallax()
@@ -733,7 +782,6 @@ struct ContentView: View {
                     .foregroundColor(.cyan)
                 }
                 
-                // 3D Holo Mesh Aç/Kapat Butonu (Mesh / Clean)
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                         isHoloMeshEnabled.toggle()
@@ -749,7 +797,7 @@ struct ContentView: View {
                     .foregroundColor(isHoloMeshEnabled ? .cyan : .white.opacity(0.6))
                 }
             }
-            // 3. PORTRE MODU SİDEBAR BUTONLARI
+            // 4. PORTRE MODU SİDEBAR BUTONLARI
             else if isPortraitMode {
                 Divider().background(Color.white.opacity(0.2)).frame(width: 36)
                 
@@ -933,6 +981,7 @@ struct ContentView: View {
         return currentCategory == .human
     }
     
+    // DÜZELTİLDİ: Portre ışığı moduna bağlanan hızlı ayar çekmecesi
     private var quickSettingsDrawer: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 16) {
@@ -945,6 +994,7 @@ struct ContentView: View {
                     drawerButton(icon: "camera.filters", label: selectedFilter, isYellow: selectedFilter != "Original") { cycleFilter() }
                 } else {
                     drawerButton(icon: "f.cursive.circle", label: "Aperture: \(apertureValue)", isYellow: true) { cycleAperture() }
+                    drawerButton(icon: selectedPortraitLighting.iconName, label: selectedPortraitLighting.shortTitle, isYellow: selectedPortraitLighting != .natural) { cyclePortraitLighting() }
                     drawerButton(icon: isPoseAIOpen ? "figure.stand" : "figure.stand.line.dotted.figure.stand", label: "Pose AI: \(isPoseAIOpen ? "On" : "Off")", isYellow: isPoseAIOpen) { isPoseAIOpen.toggle() }
                     drawerButton(icon: "timer", label: timerSetting == 0 ? "Timer: Off" : "\(timerSetting)s", isYellow: timerSetting > 0) { cycleTimer() }
                     drawerButton(icon: "camera.filters", label: selectedFilter, isYellow: selectedFilter != "Original") { cycleFilter() }
@@ -990,6 +1040,15 @@ struct ContentView: View {
         let values = ["f/1.4", "f/2.0", "f/2.8", "f/4.0", "f/5.6", "f/8.0"]
         if let idx = values.firstIndex(of: apertureValue) { apertureValue = values[(idx + 1) % values.count] }
     }
+    
+    // YENİ: Portre ışığını hızlıca döngüye sokan fonksiyon
+    private func cyclePortraitLighting() {
+        let modes = PortraitLightingMode.allCases
+        if let idx = modes.firstIndex(of: selectedPortraitLighting) {
+            selectedPortraitLighting = modes[(idx + 1) % modes.count]
+        }
+    }
+    
     private func cycleFilter() {
         let filters = ["Original", "Vivid", "Warm", "Mono", "Noir"]
         if let idx = filters.firstIndex(of: selectedFilter) { selectedFilter = filters[(idx + 1) % filters.count] }

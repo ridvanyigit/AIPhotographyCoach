@@ -13,7 +13,9 @@ class MotionManager {
     var currentRollState: RollState = .unknown
     var currentPitchState: PitchState = .unknown
     
-    // REDUCED FILTER FACTOR: From 0.08 to 0.04. This makes the lines move slower and much smoother.
+    // YENİ: Panoramik Dönüş Hızı (Açısal Hız - Gyroscope rad/s)
+    var currentAngularVelocity: Double = 0.0
+    
     private let filterFactor: Double = 0.04
     private var isFirstUpdate = true
     
@@ -35,6 +37,10 @@ class MotionManager {
             let rawRoll = motion.attitude.roll * (180.0 / .pi)
             let rawPitch = motion.attitude.pitch * (180.0 / .pi)
             
+            // Açısal dönüş hızını hesapla (Panorama Hız Koçu için)
+            let rotRate = motion.rotationRate
+            let speed = sqrt(rotRate.x * rotRate.x + rotRate.y * rotRate.y + rotRate.z * rotRate.z)
+            
             var currentRoll: Double = 0.0
             var currentPitch: Double = 0.0
             
@@ -49,6 +55,8 @@ class MotionManager {
             let pitchDeviation = currentPitch - targetPitch
             
             DispatchQueue.main.async {
+                self.currentAngularVelocity = speed
+                
                 if self.isFirstUpdate {
                     self.smoothedRoll = currentRoll
                     self.smoothedPitchDeviation = pitchDeviation
