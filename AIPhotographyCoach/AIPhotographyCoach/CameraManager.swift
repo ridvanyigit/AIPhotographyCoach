@@ -25,7 +25,13 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     // SPATIAL 3D MODU KONTROLLERİ
     var spatial3DMode: Spatial3DMode = .immersive
     var isSpatial3DActive: Bool = false
-    var parallaxIntensity: String = "Mid" // YENİ: Fotoğraf kaydına bağlanan şiddet
+    var parallaxIntensity: String = "Mid"
+    
+    // BEAUTY AI KONTROLLERİ
+    var beautyAIMode: BeautyAIMode = .naturalGlow
+    var isBeautyAIActive: Bool = false
+    var beautyIntensity: Double = 0.5 // Varsayılan %50
+    var skinTonePalette: String = "Peach"
     
     private var isMultiCam: Bool = false
     private var baseZoomFactor: CGFloat = 1.0
@@ -258,15 +264,19 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard let data = photo.fileDataRepresentation(), var image = UIImage(data: data) else { return }
         
-        // 1. SPATIAL 3D EFECTLERİ UYGULA (Parallaks Şiddetine Göre)
-        if isSpatial3DActive, let spatialImage = applySpatial3DEffect(to: image, mode: spatial3DMode) {
+        // 1. BEAUTY AI RÖTUŞ UYGULA
+        if isBeautyAIActive, let beautyImage = applyBeautyAIEffect(to: image, mode: beautyAIMode) {
+            image = beautyImage
+        }
+        // 2. SPATIAL 3D EFECTLERİ UYGULA
+        else if isSpatial3DActive, let spatialImage = applySpatial3DEffect(to: image, mode: spatial3DMode) {
             image = spatialImage
         }
-        // 2. PORTRE IŞIĞI UYGULA
+        // 3. PORTRE IŞIĞI UYGULA
         else if isPortraitActive, let portraitImage = applyPortraitLighting(to: image, mode: portraitLighting) {
             image = portraitImage
         }
-        // 3. FİLTRE UYGULA
+        // 4. FİLTRE UYGULA
         else if selectedFilter != "Original", let filteredImage = applyFilter(to: image, filterName: selectedFilter) {
             image = filteredImage
         }
@@ -275,7 +285,52 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
         DispatchQueue.main.async { self.onPhotoCaptured?(image) }
     }
     
-    // Spatial 3D Fotoğraf Efekt Motoru (Parallaks Şiddetiyle Bütünleşik)
+    // Beauty AI CoreImage Rötuş Motoru (Dinamik Slider Değeriyle Ölçeklenir)
+    private func applyBeautyAIEffect(to image: UIImage, mode: BeautyAIMode) -> UIImage? {
+        guard let ciImage = CIImage(image: image) else { return image }
+        var output = ciImage
+        
+        switch mode {
+        case .naturalGlow:
+            if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(output, forKey: kCIInputImageKey)
+                filter.setValue(1.06, forKey: kCIInputBrightnessKey)
+                filter.setValue(1.10, forKey: kCIInputSaturationKey)
+                output = filter.outputImage ?? output
+            }
+        case .smoothSkin, .proRetouch:
+            if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(output, forKey: kCIInputImageKey)
+                // Dinamik slider oranına (beautyIntensity: 0.0 - 1.0) göre parlaklık ve pürüzsüzlük
+                let brightnessBoost = 1.0 + (0.08 * beautyIntensity)
+                let saturationBoost = 1.0 + (0.14 * beautyIntensity)
+                filter.setValue(brightnessBoost, forKey: kCIInputBrightnessKey)
+                filter.setValue(1.04, forKey: kCIInputContrastKey)
+                filter.setValue(saturationBoost, forKey: kCIInputSaturationKey)
+                output = filter.outputImage ?? output
+            }
+        case .eyeBrighten:
+            if let filter = CIFilter(name: "CIColorControls") {
+                filter.setValue(output, forKey: kCIInputImageKey)
+                filter.setValue(1.14, forKey: kCIInputContrastKey)
+                output = filter.outputImage ?? output
+            }
+        case .facialTone:
+            if let filter = CIFilter(name: "CITemperatureAndTint") {
+                filter.setValue(output, forKey: kCIInputImageKey)
+                let targetTemp: CGFloat = (skinTonePalette == "Bronze" ? 7800 : (skinTonePalette == "Porcelain" ? 5800 : 7200))
+                filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+                filter.setValue(CIVector(x: targetTemp, y: 0), forKey: "inputTargetNeutral")
+                output = filter.outputImage ?? output
+            }
+        }
+        
+        if let cgImage = ciContext.createCGImage(output, from: output.extent) {
+            return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+        }
+        return image
+    }
+    
     private func applySpatial3DEffect(to image: UIImage, mode: Spatial3DMode) -> UIImage? {
         guard let ciImage = CIImage(image: image) else { return image }
         var output = ciImage

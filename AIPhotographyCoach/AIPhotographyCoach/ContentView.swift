@@ -58,6 +58,21 @@ struct ContentView: View {
     @State private var isHeadFootGuideEnabled: Bool = true
     @State private var isOutfitPopEnabled: Bool = true
     
+    // BEAUTY AI STATE'LERİ
+    @State private var selectedBeautyAIMode: BeautyAIMode = .naturalGlow
+    @State private var glowWarmth: String = "Golden" // Golden / Pearl / Rose
+    @State private var glowBoost: String = "Soft" // Soft / Vivid
+    
+    // YENİ: DİNAMİK PÜRÜZSÜZLÜK SLIDER STATE'LERİ (VARSAYILAN: %50)
+    @State private var skinSmoothValue: Double = 50.0 // 0 ile 100 arası
+    @State private var showSmoothSlider: Bool = false
+    
+    @State private var skinTextureMode: String = "Natural" // Natural / Silk
+    @State private var eyeBrightenMode: String = "Sparkle" // Sparkle / Vivid / Deep
+    @State private var darkCircleMode: String = "Max" // Light / Max
+    @State private var skinTonePalette: String = "Peach" // Peach / Bronze / Porcelain / Rosy
+    @State private var proRetouchPreset: String = "Editorial" // Editorial / Red Carpet / Glamour
+    
     // HIZLI AYAR ÇEKMECESİ STATE'LERİ
     @State private var isQuickSettingsOpen: Bool = false
     @State private var flashSetting: String = "Auto"
@@ -87,8 +102,8 @@ struct ContentView: View {
     var isSpatial3DMode: Bool { currentCategory == .human && activeModes[selectedModeIndex] == "SPATIAL 3D" }
     var isPanoMode: Bool { currentCategory == .human && activeModes[selectedModeIndex] == "PANO" }
     var isFullBodyMode: Bool { currentCategory == .human && activeModes[selectedModeIndex] == "FULL BODY" }
+    var isBeautyAIMode: Bool { currentCategory == .human && activeModes[selectedModeIndex] == "BEAUTY AI" }
     
-    // Trend Renk Teması Yardımcısı
     var currentModeAccentColor: Color {
         let modeName = activeModes[selectedModeIndex]
         return colorForCameraMode(modeName)
@@ -118,7 +133,9 @@ struct ContentView: View {
         } else if isSpatial3DMode && selectedSpatial3DMode == .holoMesh {
             return 1.25
         } else if isFullBodyMode && isOutfitPopEnabled {
-            return 1.28 // Moda kumaş renklerini canlandıran ton
+            return 1.28
+        } else if isBeautyAIMode {
+            return (selectedBeautyAIMode == .facialTone && skinTonePalette == "Rosy") ? 1.22 : 1.12
         }
         switch selectedFilter {
         case "Vivid": return 1.35
@@ -134,7 +151,9 @@ struct ContentView: View {
         } else if isSpatial3DMode && selectedSpatial3DMode == .holoMesh {
             return 1.15
         } else if isFullBodyMode && selectedFullBodyMode == .fitness {
-            return 1.25 // Kas ve duruş gölgelerini belirginleştiren kontrast
+            return 1.25
+        } else if isBeautyAIMode {
+            return selectedBeautyAIMode == .eyeBrighten ? 1.10 : 1.04
         }
         switch selectedFilter {
         case "Vivid": return 1.06
@@ -146,6 +165,9 @@ struct ContentView: View {
     
     private var filterBrightness: Double {
         if isPortraitMode && selectedPortraitLighting == .highKeyMono { return 0.1 }
+        if isBeautyAIMode {
+            return selectedBeautyAIMode == .naturalGlow ? 0.05 : 0.03
+        }
         switch selectedFilter {
         case "Noir": return -0.04
         default: return 0.0
@@ -163,6 +185,13 @@ struct ContentView: View {
     private var filterColorMultiply: Color {
         if isSpatial3DMode && selectedSpatial3DMode == .holoMesh {
             return Color(red: 0.88, green: 1.0, blue: 1.0)
+        } else if isBeautyAIMode {
+            switch skinTonePalette {
+            case "Bronze": return Color(red: 1.06, green: 0.96, blue: 0.88)
+            case "Porcelain": return Color(red: 0.98, green: 0.99, blue: 1.05)
+            case "Rosy": return Color(red: 1.05, green: 0.94, blue: 0.96)
+            default: return Color(red: 1.04, green: 0.96, blue: 0.94) // Peach
+            }
         }
         switch selectedFilter {
         case "Warm": return Color(red: 1.05, green: 0.98, blue: 0.92)
@@ -191,6 +220,8 @@ struct ContentView: View {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { showCategoryMenu = false }
                             } else if isSidebarOpen {
                                 withAnimation(.spring()) { isSidebarOpen = false }
+                            } else if showSmoothSlider {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { showSmoothSlider = false }
                             } else if isCountingDown {
                                 cancelTimer()
                             } else {
@@ -215,6 +246,7 @@ struct ContentView: View {
                     portraitLightingLiveOverlay.ignoresSafeArea()
                     spatial3DLiveOverlay.ignoresSafeArea()
                     spatialMeshLiveOverlay.ignoresSafeArea()
+                    beautyAILiveOverlay.ignoresSafeArea()
                     
                     CompositionGridView().ignoresSafeArea()
                     FaceDetectionView(faces: visionManager.detectedFaces).ignoresSafeArea()
@@ -304,6 +336,13 @@ struct ContentView: View {
                     VStack(spacing: 0) {
                         Spacer()
                         
+                        // YENİ: DİNAMİK SMOOTH SKIN CAM AYAR ÇUBUĞU (Precision Slider)
+                        if showSmoothSlider && isBeautyAIMode && selectedBeautyAIMode == .smoothSkin {
+                            smoothSkinSliderOverlay
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .padding(.bottom, 10)
+                        }
+                        
                         if isQuickSettingsOpen {
                             quickSettingsDrawer
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -333,6 +372,16 @@ struct ContentView: View {
                             FullBodyDialView(selectedMode: $selectedFullBodyMode)
                                 .padding(.bottom, 10)
                                 .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        } else if isBeautyAIMode {
+                            BeautyAIDialView(selectedMode: $selectedBeautyAIMode)
+                                .padding(.bottom, 10)
+                                .transition(.scale(scale: 0.9).combined(with: .opacity))
+                                .onChange(of: selectedBeautyAIMode) { _, newBeauty in
+                                    cameraManager.beautyAIMode = newBeauty
+                                    if newBeauty != .smoothSkin {
+                                        showSmoothSlider = false
+                                    }
+                                }
                         } else if cameraManager.currentPosition == .back {
                             HStack(spacing: 12) {
                                 ForEach([0.5, 1.0, 2.0, 3.0], id: \.self) { zoom in
@@ -370,8 +419,42 @@ struct ContentView: View {
                         }
                         .padding(.bottom, 15)
                         
-                        ShutterButtonView(action: takePhoto)
-                            .padding(.bottom, 20)
+                        // DEKLANŞÖR & YANINA YERLEŞTİRİLEN AUTO (A) BUTONU
+                        ZStack {
+                            ShutterButtonView(action: takePhoto)
+                            
+                            HStack {
+                                Spacer()
+                                Button(action: {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                                        isAutoCaptureEnabled.toggle()
+                                    }
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                }) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.black.opacity(0.6))
+                                            .frame(width: 44, height: 44)
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(isAutoCaptureEnabled ? Color.yellow : Color.white.opacity(0.3), lineWidth: isAutoCaptureEnabled ? 2 : 1)
+                                            )
+                                            .shadow(color: isAutoCaptureEnabled ? Color.yellow.opacity(0.6) : Color.clear, radius: 8)
+                                        
+                                        VStack(spacing: 2) {
+                                            Image(systemName: isAutoCaptureEnabled ? "a.circle.fill" : "a.circle")
+                                                .font(.system(size: 18, weight: .bold))
+                                            Text("AUTO")
+                                                .font(.system(size: 7, weight: .black, design: .rounded))
+                                        }
+                                        .foregroundColor(isAutoCaptureEnabled ? .yellow : .white.opacity(0.85))
+                                    }
+                                }
+                                .padding(.trailing, 24)
+                            }
+                            .frame(width: 300)
+                        }
+                        .padding(.bottom, 20)
                         
                         // ZSTACK: Sabit Butonlar ve Sihirli Cam Seçici
                         ZStack(alignment: .center) {
@@ -510,6 +593,18 @@ struct ContentView: View {
                 cameraManager.spatial3DMode = selectedSpatial3DMode
                 cameraManager.parallaxIntensity = parallaxIntensity
             }
+            .onChange(of: isBeautyAIMode) { _, active in
+                cameraManager.isBeautyAIActive = active
+                cameraManager.beautyAIMode = selectedBeautyAIMode
+                cameraManager.skinTonePalette = skinTonePalette
+                cameraManager.beautyIntensity = skinSmoothValue / 100.0
+            }
+            .onChange(of: skinTonePalette) { _, newTone in
+                cameraManager.skinTonePalette = newTone
+            }
+            .onChange(of: skinSmoothValue) { _, newValue in
+                cameraManager.beautyIntensity = newValue / 100.0
+            }
             .onChange(of: parallaxIntensity) { _, newIntensity in
                 cameraManager.parallaxIntensity = newIntensity
             }
@@ -517,6 +612,130 @@ struct ContentView: View {
             .onChange(of: visionManager.poseAdvice) { _, _ in triggerVoiceCoach() }
             .onChange(of: motionManager.currentRollState) { _, _ in triggerVoiceCoach() }
             .onChange(of: motionManager.currentPitchState) { _, _ in triggerVoiceCoach() }
+        }
+    }
+    
+    // MARK: - YENİ: Smooth Skin İnteraktif Cam Ayar Çubuğu (Precision Slider)
+    private var smoothSkinSliderOverlay: some View {
+        let pinkColor = Color(red: 1.0, green: 0.35, blue: 0.75)
+        
+        return VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "face.smiling.fill")
+                    .font(.system(size: 13, weight: .bold))
+                
+                Text("SKIN SMOOTHNESS: \(Int(skinSmoothValue))%")
+                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                
+                Spacer()
+                
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                        skinSmoothValue = 50.0
+                        cameraManager.beautyIntensity = 0.5
+                    }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    Text("RESET (50%)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+            }
+            .foregroundColor(pinkColor)
+            
+            HStack(spacing: 12) {
+                Text("0%")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                
+                Slider(value: $skinSmoothValue, in: 0...100, step: 1)
+                    .tint(pinkColor)
+                
+                Text("100%")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .frame(width: 320)
+        .background(Color.black.opacity(0.45))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(pinkColor.opacity(0.4), lineWidth: 1))
+        .shadow(color: pinkColor.opacity(0.3), radius: 10, y: 5)
+    }
+    
+    // MARK: - Beauty AI Canlı Yüz Shader & Göz Takip Katmanı
+    @ViewBuilder
+    private var beautyAILiveOverlay: some View {
+        let pinkColor = Color(red: 1.0, green: 0.35, blue: 0.75)
+        
+        if isBeautyAIMode, let face = visionManager.detectedFaces.first {
+            GeometryReader { geo in
+                let w = face.width * geo.size.width
+                let h = face.height * geo.size.height
+                let x = face.minX * geo.size.width
+                let y = (1 - face.minY - face.height) * geo.size.height
+                
+                ZStack(alignment: .topLeading) {
+                    if selectedBeautyAIMode == .naturalGlow {
+                        RadialGradient(
+                            gradient: Gradient(colors: [
+                                (glowWarmth == "Rose" ? pinkColor : (glowWarmth == "Pearl" ? Color.white : Color.yellow)).opacity(glowBoost == "Vivid" ? 0.22 : 0.12),
+                                Color.clear
+                            ]),
+                            center: .center,
+                            startRadius: 20,
+                            endRadius: w * 0.9
+                        )
+                        .frame(width: w * 1.5, height: h * 1.5)
+                        .position(x: x + w/2, y: y + h/2)
+                    }
+                    
+                    if selectedBeautyAIMode == .eyeBrighten {
+                        HStack(spacing: w * 0.22) {
+                            Circle()
+                                .stroke(pinkColor, lineWidth: 1.5)
+                                .frame(width: w * 0.18, height: w * 0.18)
+                                .overlay(Circle().fill(Color.white.opacity(0.3)))
+                                .shadow(color: pinkColor, radius: 4)
+                            
+                            Circle()
+                                .stroke(pinkColor, lineWidth: 1.5)
+                                .frame(width: w * 0.18, height: w * 0.18)
+                                .overlay(Circle().fill(Color.white.opacity(0.3)))
+                                .shadow(color: pinkColor, radius: 4)
+                        }
+                        .position(x: x + w/2, y: y + h * 0.36)
+                    }
+                    
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(pinkColor.opacity(0.6), lineWidth: 1.2)
+                        .frame(width: w, height: h)
+                        .position(x: x + w/2, y: y + h/2)
+                        .overlay(
+                            HStack(spacing: 3) {
+                                Image(systemName: selectedBeautyAIMode.iconName)
+                                    .font(.system(size: 8))
+                                Text(selectedBeautyAIMode == .smoothSkin ? "SMOOTH \(Int(skinSmoothValue))%" : selectedBeautyAIMode.rawValue)
+                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(pinkColor)
+                            .cornerRadius(4)
+                            .position(x: x + w/2, y: y - 12)
+                        )
+                }
+            }
+            .allowsHitTesting(false)
+            .transition(.opacity)
         }
     }
     
@@ -715,149 +934,209 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - DİNAMİK SİDEBAR İÇERİĞİ (Zengin Full Body Desteği)
+    // MARK: - DİNAMİK SİDEBAR İÇERİĞİ
     @ViewBuilder
     private var dynamicSidebarContent: some View {
+        let pinkColor = Color(red: 1.0, green: 0.35, blue: 0.75)
         let violetColor = Color(red: 0.78, green: 0.42, blue: 1.0)
         
         VStack(spacing: 20) {
-            // 1. AUTO CAPTURE
-            Button(action: { withAnimation { isAutoCaptureEnabled.toggle() } }) {
-                VStack(spacing: 4) {
-                    Image(systemName: isAutoCaptureEnabled ? "a.circle.fill" : "a.circle")
-                        .font(.system(size: 24, weight: .light))
-                    Text("Auto")
-                        .font(.system(size: 9, weight: .bold))
-                }
-                .foregroundColor(isAutoCaptureEnabled ? currentModeAccentColor : .white)
-            }
-            
-            // 2. FULL BODY ÖZEL SİDEBAR BUTONLARI (ZENGİNLEŞTİRİLDİ)
-            if isFullBodyMode {
-                Divider().background(Color.white.opacity(0.2)).frame(width: 36)
-                
-                // Kılavuz Çizgileri Aç/Kapat
-                Button(action: {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        isHeadFootGuideEnabled.toggle()
+            // 1. BEAUTY AI SİDEBAR
+            if isBeautyAIMode {
+                switch selectedBeautyAIMode {
+                case .naturalGlow:
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { cycleGlowWarmth() }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "sparkles").font(.system(size: 22))
+                            Text(glowWarmth).font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(pinkColor)
                     }
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                }) {
-                    VStack(spacing: 4) {
-                        Image(systemName: isHeadFootGuideEnabled ? "square.topthird.inset.filled" : "square.dashed")
-                            .font(.system(size: 22))
-                        Text(isHeadFootGuideEnabled ? "Guide" : "Clean")
-                            .font(.system(size: 9, weight: .bold))
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { glowBoost = (glowBoost == "Soft" ? "Vivid" : "Soft") }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "sun.max.fill").font(.system(size: 22))
+                            Text(glowBoost).font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(pinkColor)
                     }
-                    .foregroundColor(isHeadFootGuideEnabled ? violetColor : .white.opacity(0.6))
-                }
-                
-                // Moda Kumaş & Renk Canlandırıcı (Outfit Pop)
-                if selectedFullBodyMode == .fashion {
+                    
+                case .smoothSkin:
+                    // YENİ: CAM AYAR ÇUBUĞUNU AÇAN PÜRÜZSÜZLÜK BUTONU (VARSAYILAN %50)
                     Button(action: {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            isOutfitPopEnabled.toggle()
+                            showSmoothSlider.toggle()
                         }
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }) {
                         VStack(spacing: 4) {
-                            Image(systemName: isOutfitPopEnabled ? "sparkles.rectangle.stack.fill" : "sparkles.rectangle.stack")
-                                .font(.system(size: 22))
-                            Text(isOutfitPopEnabled ? "Pop On" : "Pop Off")
-                                .font(.system(size: 9, weight: .bold))
+                            Image(systemName: "face.smiling.fill").font(.system(size: 22))
+                            Text("\(Int(skinSmoothValue))%").font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(showSmoothSlider ? .yellow : pinkColor)
+                    }
+                    
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { skinTextureMode = (skinTextureMode == "Natural" ? "Silk" : "Natural") }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "circle.dotted").font(.system(size: 22))
+                            Text(skinTextureMode).font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(pinkColor)
+                    }
+                    
+                case .eyeBrighten:
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { cycleEyeBrighten() }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "eyes").font(.system(size: 22))
+                            Text(eyeBrightenMode).font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(pinkColor)
+                    }
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { darkCircleMode = (darkCircleMode == "Max" ? "Light" : "Max") }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "moon.fill").font(.system(size: 22))
+                            Text(darkCircleMode).font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(pinkColor)
+                    }
+                    
+                case .facialTone:
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { cycleSkinTone() }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "paintpalette.fill").font(.system(size: 22))
+                            Text(skinTonePalette).font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(pinkColor)
+                    }
+                    
+                case .proRetouch:
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { cycleProRetouch() }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "wand.and.rays").font(.system(size: 22))
+                            Text(proRetouchPreset).font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(pinkColor)
+                    }
+                }
+                
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { isPoseAIOpen.toggle() }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: isPoseAIOpen ? "face.smiling.fill" : "face.smiling").font(.system(size: 22))
+                        Text(isPoseAIOpen ? "Face AI" : "Off").font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(isPoseAIOpen ? pinkColor : .white.opacity(0.6))
+                }
+            }
+            // 2. FULL BODY SİDEBAR
+            else if isFullBodyMode {
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { isHeadFootGuideEnabled.toggle() }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: isHeadFootGuideEnabled ? "square.topthird.inset.filled" : "square.dashed").font(.system(size: 22))
+                        Text(isHeadFootGuideEnabled ? "Guide" : "Clean").font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(isHeadFootGuideEnabled ? violetColor : .white.opacity(0.6))
+                }
+                
+                if selectedFullBodyMode == .fashion {
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { isOutfitPopEnabled.toggle() }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: isOutfitPopEnabled ? "sparkles.rectangle.stack.fill" : "sparkles.rectangle.stack").font(.system(size: 22))
+                            Text(isOutfitPopEnabled ? "Pop On" : "Pop Off").font(.system(size: 9, weight: .bold))
                         }
                         .foregroundColor(isOutfitPopEnabled ? violetColor : .white.opacity(0.6))
                     }
                 }
                 
-                // Model Duruş & Pose AI
                 Button(action: {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        isPoseAIOpen.toggle()
-                    }
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { isPoseAIOpen.toggle() }
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }) {
                     VStack(spacing: 4) {
-                        Image(systemName: isPoseAIOpen ? "figure.stand" : "figure.stand.line.dotted.figure.stand")
-                            .font(.system(size: 22))
-                        Text("Pose AI")
-                            .font(.system(size: 9, weight: .bold))
+                        Image(systemName: isPoseAIOpen ? "figure.stand" : "figure.stand.line.dotted.figure.stand").font(.system(size: 22))
+                        Text("Pose AI").font(.system(size: 9, weight: .bold))
                     }
                     .foregroundColor(isPoseAIOpen ? violetColor : .white.opacity(0.6))
                 }
             }
-            // 3. PANO MODU SİDEBAR BUTONLARI
+            // 3. PANO SİDEBAR
             else if isPanoMode {
-                Divider().background(Color.white.opacity(0.2)).frame(width: 36)
-                
                 Button(action: {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        panoDirection = (panoDirection == .leftToRight ? .rightToLeft : .leftToRight)
-                    }
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { panoDirection = (panoDirection == .leftToRight ? .rightToLeft : .leftToRight) }
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }) {
                     VStack(spacing: 4) {
-                        Image(systemName: panoDirection == .leftToRight ? "arrow.right.circle.fill" : "arrow.left.circle.fill")
-                            .font(.system(size: 22))
-                        Text(panoDirection == .leftToRight ? "L ➔ R" : "R ➔ L")
-                            .font(.system(size: 9, weight: .bold))
+                        Image(systemName: panoDirection == .leftToRight ? "arrow.right.circle.fill" : "arrow.left.circle.fill").font(.system(size: 22))
+                        Text(panoDirection == .leftToRight ? "L ➔ R" : "R ➔ L").font(.system(size: 9, weight: .bold))
                     }
                     .foregroundColor(Color(red: 1.0, green: 0.55, blue: 0.1))
                 }
                 
                 Button(action: {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        selectedPanoMode = (selectedPanoMode == .vertorama ? .wideGroup : .vertorama)
-                    }
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { selectedPanoMode = (selectedPanoMode == .vertorama ? .wideGroup : .vertorama) }
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }) {
                     VStack(spacing: 4) {
-                        Image(systemName: selectedPanoMode == .vertorama ? "arrow.up.and.down.square.fill" : "pano.fill")
-                            .font(.system(size: 22))
-                        Text(selectedPanoMode == .vertorama ? "Vert" : "Hori")
-                            .font(.system(size: 9, weight: .bold))
+                        Image(systemName: selectedPanoMode == .vertorama ? "arrow.up.and.down.square.fill" : "pano.fill").font(.system(size: 22))
+                        Text(selectedPanoMode == .vertorama ? "Vert" : "Hori").font(.system(size: 9, weight: .bold))
                     }
                     .foregroundColor(Color(red: 1.0, green: 0.55, blue: 0.1))
                 }
             }
-            // 4. SPATIAL 3D SİDEBAR BUTONLARI
+            // 4. SPATIAL 3D SİDEBAR
             else if isSpatial3DMode {
-                Divider().background(Color.white.opacity(0.2)).frame(width: 36)
-                
                 Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                        cycleParallax()
-                    }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { cycleParallax() }
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }) {
                     VStack(spacing: 4) {
-                        Image(systemName: "square.3.layers.3d.down.right")
-                            .font(.system(size: 22))
-                        Text(parallaxIntensity)
-                            .font(.system(size: 9, weight: .bold))
+                        Image(systemName: "square.3.layers.3d.down.right").font(.system(size: 22))
+                        Text(parallaxIntensity).font(.system(size: 9, weight: .bold))
                     }
                     .foregroundColor(.cyan)
                 }
                 
                 Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                        isHoloMeshEnabled.toggle()
-                    }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { isHoloMeshEnabled.toggle() }
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }) {
                     VStack(spacing: 4) {
-                        Image(systemName: isHoloMeshEnabled ? "cube.transparent.fill" : "cube.transparent")
-                            .font(.system(size: 22))
-                        Text(isHoloMeshEnabled ? "Mesh" : "Clean")
-                            .font(.system(size: 9, weight: .bold))
+                        Image(systemName: isHoloMeshEnabled ? "cube.transparent.fill" : "cube.transparent").font(.system(size: 22))
+                        Text(isHoloMeshEnabled ? "Mesh" : "Clean").font(.system(size: 9, weight: .bold))
                     }
                     .foregroundColor(isHoloMeshEnabled ? .cyan : .white.opacity(0.6))
                 }
             }
-            // 5. PORTRE MODU SİDEBAR BUTONLARI
+            // 5. PORTRE SİDEBAR
             else if isPortraitMode {
-                Divider().background(Color.white.opacity(0.2)).frame(width: 36)
-                
                 switch selectedPortraitLighting {
                 case .natural:
                     Button(action: { cycleAperture(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }) {
@@ -911,7 +1190,7 @@ struct ContentView: View {
             Spacer()
         }
         .padding(.top, 25)
-        .frame(width: 64, height: 320)
+        .frame(width: 64, height: 280)
         .background(Color.black.opacity(0.25))
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
@@ -1085,6 +1364,23 @@ struct ContentView: View {
         }
     }
     
+    private func cycleGlowWarmth() {
+        let values = ["Golden", "Pearl", "Rose"]
+        if let idx = values.firstIndex(of: glowWarmth) { glowWarmth = values[(idx + 1) % values.count] }
+    }
+    private func cycleEyeBrighten() {
+        let values = ["Sparkle", "Vivid", "Deep"]
+        if let idx = values.firstIndex(of: eyeBrightenMode) { eyeBrightenMode = values[(idx + 1) % values.count] }
+    }
+    private func cycleSkinTone() {
+        let values = ["Peach", "Bronze", "Porcelain", "Rosy"]
+        if let idx = values.firstIndex(of: skinTonePalette) { skinTonePalette = values[(idx + 1) % values.count] }
+    }
+    private func cycleProRetouch() {
+        let values = ["Editorial", "Red Carpet", "Glamour"]
+        if let idx = values.firstIndex(of: proRetouchPreset) { proRetouchPreset = values[(idx + 1) % values.count] }
+    }
+    
     private func triggerVoiceCoach() {
         voiceCoach.provideGuidance(framing: visionManager.framingAdvice, pose: visionManager.poseAdvice, roll: motionManager.currentRollState, pitch: motionManager.currentPitchState)
         checkAutoCapture()
@@ -1163,25 +1459,24 @@ struct ContentView: View {
         cameraManager.focusAndExpose(at: location, screenWidth: size.width, screenHeight: size.height)
     }
     
-    // YENİ: Her Mod İçin Benzersiz Canlı Neon Dijital Renk Eşlemesi
     private func colorForCameraMode(_ mode: String) -> Color {
         switch mode {
-        case "PHOTO": return Color.yellow // Klasik Altın
-        case "PRO RAW": return Color(red: 0.4, green: 0.75, blue: 1.0) // Buz Mavisi
-        case "MACRO": return Color(red: 0.3, green: 0.95, blue: 0.45) // Neon Lime
-        case "ACTION": return Color(red: 1.0, green: 0.35, blue: 0.2) // Elektrik Kırmızı
-        case "HUMAN": return Color(red: 1.0, green: 0.8, blue: 0.5) // Sıcak Şeftali
-        case "PORTRAIT": return Color(red: 1.0, green: 0.78, blue: 0.15) // Stüdyo Altın
-        case "SPATIAL 3D": return Color(red: 0.2, green: 0.9, blue: 1.0) // Siber Cyan
-        case "PANO": return Color(red: 1.0, green: 0.55, blue: 0.1) // Gün Batımı Amber
-        case "FULL BODY": return Color(red: 0.78, green: 0.42, blue: 1.0) // Moda Moru
+        case "PHOTO": return Color.yellow
+        case "PRO RAW": return Color(red: 0.4, green: 0.75, blue: 1.0)
+        case "MACRO": return Color(red: 0.3, green: 0.95, blue: 0.45)
+        case "ACTION": return Color(red: 1.0, green: 0.35, blue: 0.2)
+        case "HUMAN": return Color(red: 1.0, green: 0.8, blue: 0.5)
+        case "PORTRAIT": return Color(red: 1.0, green: 0.78, blue: 0.15)
+        case "SPATIAL 3D": return Color(red: 0.2, green: 0.9, blue: 1.0)
+        case "PANO": return Color(red: 1.0, green: 0.55, blue: 0.1)
+        case "FULL BODY": return Color(red: 0.78, green: 0.42, blue: 1.0)
         case "BEAUTY AI": return Color(red: 1.0, green: 0.35, blue: 0.75) // Gül Pembe
         default: return .yellow
         }
     }
 }
 
-// MARK: - APPLE STANDARTLARINDA SİHİRLİ CAM MOD SEÇİCİ (HER MODA ÖZEL RENK)
+// MARK: - APPLE STANDARTLARINDA SİHİRLİ CAM MOD SEÇİCİ
 struct AppleGlassModePicker: View {
     let modes: [String]
     @Binding var selectedIndex: Int
@@ -1228,7 +1523,6 @@ struct AppleGlassModePicker: View {
                 .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                 .frame(width: 120, height: 44)
 
-            // KATMAN 3: HER MODUN KENDİ BENZERSİZ DİJİTAL NEON RENGİ
             HStack(spacing: 0) {
                 ForEach(0..<modes.count, id: \.self) { i in
                     Text(modes[i])
