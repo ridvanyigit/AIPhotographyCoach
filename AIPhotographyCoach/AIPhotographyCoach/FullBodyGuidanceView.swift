@@ -1,39 +1,43 @@
 import SwiftUI
 
-// MARK: - Boydan Çekim İçin Canlı Altın Oran, Tepe/Ayak Kılavuzu ve Açı Koçu
 struct FullBodyGuidanceView: View {
     let mode: FullBodyMode
     let pitchDeviation: Double
     let hasFace: Bool
     let isGuideEnabled: Bool
+    let bodyFitState: BodyFitState // YENİ: Canlı İskelet Uyumu
     
-    private let violetColor = Color(red: 0.78, green: 0.42, blue: 1.0)
-    
-    // Low-Angle boy uzatma açısı (-2° ile -8° arası)
     private var isLowAngleOptimal: Bool {
         pitchDeviation >= -8.0 && pitchDeviation <= -2.0
     }
     
-    private var angleStatusText: String {
-        switch mode {
-        case .lowAngle:
-            return isLowAngleOptimal ? "IDEAL LOW ANGLE (-5°) ✨" : (pitchDeviation > -2.0 ? "TILT UP SLIGHTLY ⇡ (FOR TALLER LOOK)" : "TILT DOWN SLIGHTLY ⇣")
-        case .fashion:
-            return abs(pitchDeviation) <= 4.0 ? "PERFECT OUTFIT ALIGNMENT ✨" : (pitchDeviation > 0 ? "LOWER TO WAIST LEVEL ⬇️" : "LEVEL CAMERA ⇡")
-        case .modelPose:
-            return "MODEL S-CURVE ACTIVE ✨"
-        case .fitness:
-            return abs(pitchDeviation) <= 3.0 ? "PERFECT SYMMETRY ✨" : "ALIGN BODY CENTER ⚖️"
-        case .casualStreet:
-            return "NATURAL STREET FLOW ✨"
+    // Canlı Yapay Zekâ Yönlendirme Metni
+    private var guidanceText: String {
+        switch bodyFitState {
+        case .searching:
+            return "SEARCHING FULL BODY..."
+        case .stepBack:
+            return "STEP BACK (FEET / HEAD CUT OFF) 👣"
+        case .moveCloser:
+            return "MOVE CLOSER (FILL THE FRAME) 🔍"
+        case .adjustTilt:
+            if mode == .lowAngle {
+                return isLowAngleOptimal ? "PERFECT ANGLE (-5°) ✨" : (pitchDeviation > -2.0 ? "TILT UP SLIGHTLY ⇡" : "TILT DOWN ⇣")
+            } else {
+                return abs(pitchDeviation) <= 4.0 ? "LEVEL CAMERA ✨" : "ALIGN CAMERA TO WAIST ⬇️"
+            }
+        case .perfectFit:
+            return "GOLDEN RATIO: PERFECT FIT ✨"
         }
     }
     
-    private var statusColor: Color {
-        if mode == .lowAngle {
-            return isLowAngleOptimal ? .green : violetColor
-        } else {
-            return abs(pitchDeviation) <= 4.0 ? .green : violetColor
+    // Çizgi ve Rozet Renkleri
+    private var activeLineColor: Color {
+        switch bodyFitState {
+        case .perfectFit: return .green
+        case .stepBack: return .orange
+        case .moveCloser: return .yellow
+        default: return .white.opacity(0.65)
         }
     }
     
@@ -41,74 +45,99 @@ struct FullBodyGuidanceView: View {
         GeometryReader { geo in
             ZStack {
                 if isGuideEnabled {
-                    // 1. ÜST TEPE HAVA PAYI ÇİZGİSİ (HEADROOM GUIDE - %15)
+                    // 1. DİNAMİK TEPE HAVA PAYI ÇİZGİSİ
                     VStack {
                         HStack {
                             Text("HEADROOM (15%)")
                                 .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundColor(violetColor.opacity(0.85))
+                                .foregroundColor(bodyFitState == .perfectFit ? .green : .white)
+                                .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.black.opacity(0.15))
+                                .background(.ultraThinMaterial.opacity(0.2))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(bodyFitState == .perfectFit ? Color.green.opacity(0.5) : Color.white.opacity(0.15), lineWidth: 0.5))
+                            
                             Spacer()
                         }
                         .padding(.horizontal, 24)
                         
                         Rectangle()
-                            .fill(violetColor.opacity(0.35))
-                            .frame(height: 1)
+                            .fill(activeLineColor)
+                            .frame(height: bodyFitState == .perfectFit ? 2 : 1)
+                            .shadow(color: bodyFitState == .perfectFit ? Color.green.opacity(0.8) : Color.black.opacity(0.8), radius: bodyFitState == .perfectFit ? 4 : 2, y: 1)
                             .padding(.horizontal, 20)
+                            .animation(.easeInOut(duration: 0.25), value: bodyFitState)
                         
                         Spacer()
                     }
                     .padding(.top, 95)
                     
-                    // 2. MODA MODU: 8-BAŞ ORAN KILAVUZU
+                    // 2. MODA MODU: 8-BAŞ ORANLARI
                     if mode == .fashion {
                         HStack {
-                            Spacer()
-                            VStack(spacing: 28) {
+                            VStack(spacing: 26) {
                                 ForEach(1..<8) { num in
                                     HStack(spacing: 4) {
                                         Text("\(num)H")
-                                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                            .foregroundColor(violetColor.opacity(0.6))
+                                            .font(.system(size: 8.5, weight: num == 4 ? .heavy : .bold, design: .monospaced))
+                                            .foregroundColor(bodyFitState == .perfectFit ? .green : (num == 4 ? .yellow : .white))
+                                            .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.black.opacity(0.15))
+                                            .background(.ultraThinMaterial.opacity(0.2))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(num == 4 ? Color.yellow.opacity(0.35) : Color.white.opacity(0.12), lineWidth: 0.5))
+                                        
                                         Rectangle()
-                                            .fill(violetColor.opacity(0.4))
-                                            .frame(width: 8, height: 1)
+                                            .fill(bodyFitState == .perfectFit ? Color.green : (num == 4 ? Color.yellow : Color.white.opacity(0.85)))
+                                            .frame(width: num == 4 ? 10 : 6, height: 1.2)
+                                            .shadow(color: .black.opacity(0.8), radius: 1, y: 1)
                                     }
                                 }
                             }
-                            .padding(.trailing, 16)
+                            .padding(.leading, 16)
+                            
+                            Spacer()
                         }
                     }
                     
-                    // 3. FITNESS MODU: DİKEY SİMETRİ LAZER ÇİZGİSİ
+                    // 3. FITNESS MODU: DİKEY SİMETRİ LAZERİ
                     if mode == .fitness {
                         VStack {
                             Rectangle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.clear, violetColor.opacity(0.6), .clear],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
+                                .fill(LinearGradient(colors: [.clear, (bodyFitState == .perfectFit ? Color.green : Color.yellow).opacity(0.85), .clear], startPoint: .top, endPoint: .bottom))
                                 .frame(width: 1.5, height: geo.size.height * 0.45)
+                                .shadow(color: .black.opacity(0.8), radius: 2)
                         }
                     }
                     
-                    // 4. ALT AYAK TABAN ÇİZGİSİ (FOOTLINE GROUNDING)
+                    // 4. DİNAMİK AYAK TABAN ÇİZGİSİ
                     VStack {
                         Spacer()
                         
                         Rectangle()
-                            .fill(violetColor.opacity(0.45))
-                            .frame(height: 1.5)
+                            .fill(activeLineColor)
+                            .frame(height: bodyFitState == .perfectFit ? 2.5 : 1.2)
+                            .shadow(color: bodyFitState == .perfectFit ? Color.green.opacity(0.8) : Color.black.opacity(0.8), radius: bodyFitState == .perfectFit ? 4 : 2, y: 1)
                             .padding(.horizontal, 20)
+                            .animation(.easeInOut(duration: 0.25), value: bodyFitState)
                         
                         HStack {
-                            Spacer()
                             Text("FEET BASELINE")
                                 .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundColor(violetColor.opacity(0.85))
+                                .foregroundColor(bodyFitState == .perfectFit ? .green : .white)
+                                .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.black.opacity(0.15))
+                                .background(.ultraThinMaterial.opacity(0.2))
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(bodyFitState == .perfectFit ? Color.green.opacity(0.5) : Color.white.opacity(0.15), lineWidth: 0.5))
+                            
+                            Spacer()
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 4)
@@ -116,24 +145,25 @@ struct FullBodyGuidanceView: View {
                     .padding(.bottom, 220)
                 }
                 
-                // 5. GÜVENLİ ALANDA AÇI & YÜKSEKLİK ROZETİ (ÖRTÜŞME TAMAMEN ÇÖZÜLDÜ - ÜST ORTAYA TAŞINDI)
+                // 5. GÜVENLİ ALANDA CANLI DURUM VE YÖNLENDİRME ROZETİ
                 VStack {
                     HStack(spacing: 6) {
-                        Image(systemName: mode.iconName)
+                        Image(systemName: bodyFitState == .perfectFit ? "star.fill" : mode.iconName)
                             .font(.system(size: 11, weight: .bold))
                         
-                        Text(angleStatusText)
+                        Text(guidanceText)
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                     }
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(statusColor.opacity(0.85))
-                    .background(.ultraThinMaterial)
-                    .foregroundColor(.white)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.25))
+                    .background(.ultraThinMaterial.opacity(0.3))
+                    .foregroundColor(bodyFitState == .perfectFit ? .green : (bodyFitState == .stepBack ? .orange : .yellow))
                     .clipShape(Capsule())
-                    .shadow(color: statusColor.opacity(0.5), radius: 8)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: angleStatusText)
-                    .padding(.top, 140) // Kılavuzun hemen altında temiz güvenli alan
+                    .overlay(Capsule().stroke((bodyFitState == .perfectFit ? Color.green : Color.yellow).opacity(0.5), lineWidth: 0.8))
+                    .shadow(color: (bodyFitState == .perfectFit ? Color.green : Color.yellow).opacity(0.3), radius: 6)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: guidanceText)
+                    .padding(.top, 140)
                     
                     Spacer()
                 }

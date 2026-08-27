@@ -23,35 +23,28 @@ struct ContentView: View {
     @State private var lastSavedImage: UIImage? = nil
     @State private var isShowingPreview: Bool = false
     
-    // ZOOM STATE
     @State private var selectedZoom: Double = 1.0
     
-    // KUSURSUZ APPLE GLASS MOD SEÇİCİ (YALNIZCA İNSAN ODAKLI MODLAR)
     var activeModes: [String] { ["PORTRAIT", "RUNWAY", "FULL BODY", "BEAUTY AI", "GROUP PANO", "SPATIAL 3D"] }
     @State private var selectedModeIndex: Int = 0
     @State private var isDraggingMode: Bool = false
     
-    // PORTRE IŞIĞI STATE'LERİ
     @State private var selectedPortraitLighting: PortraitLightingMode = .natural
     @State private var studioBoost: Double = 0.5
     @State private var spotlightRadius: Double = 180.0
     @State private var highKeyExposure: Double = 0.8
     
-    // SPATIAL 3D STATE'LERİ
     @State private var selectedSpatial3DMode: Spatial3DMode = .immersive
     @State private var parallaxIntensity: String = "Mid"
     @State private var isHoloMeshEnabled: Bool = true
     
-    // PANO MODU STATE'LERİ
     @State private var selectedPanoMode: PanoMode = .wideGroup
     @State private var panoDirection: PanoDirection = .leftToRight
     
-    // FULL BODY STATE'LERİ
     @State private var selectedFullBodyMode: FullBodyMode = .fashion
     @State private var isHeadFootGuideEnabled: Bool = true
     @State private var isOutfitPopEnabled: Bool = true
     
-    // BEAUTY AI STATE'LERİ
     @State private var selectedBeautyAIMode: BeautyAIMode = .naturalGlow
     @State private var glowWarmth: String = "Golden"
     @State private var glowBoost: String = "Soft"
@@ -63,7 +56,6 @@ struct ContentView: View {
     @State private var skinTonePalette: String = "Peach"
     @State private var proRetouchPreset: String = "Editorial"
     
-    // GENEL AYARLAR
     @State private var flashSetting: String = "Auto"
     @State private var timerSetting: Int = 0
     @State private var exposureValue: Double = 0.0
@@ -71,19 +63,14 @@ struct ContentView: View {
     @State private var apertureValue: String = "f/2.8"
     @State private var isPoseAIOpen: Bool = true
     
-    // Zamanlayıcı Geri Sayım State'leri
     @State private var countdownRemaining: Int = 0
     @State private var isCountingDown: Bool = false
     @State private var timerTask: Task<Void, Never>? = nil
     
-    // SIDEBAR & DİŞLİ ÇARK
     @State private var isSidebarOpen: Bool = false
     @State private var gearAngle: Double = 0.0
-    
-    // Pinch Zoom
     @State private var baseZoomOnPinch: Double = 1.0
     
-    // MOD KONTROLLERİ
     var isPortraitMode: Bool { activeModes[selectedModeIndex] == "PORTRAIT" }
     var isRunwayMode: Bool { activeModes[selectedModeIndex] == "RUNWAY" }
     var isFullBodyMode: Bool { activeModes[selectedModeIndex] == "FULL BODY" }
@@ -91,9 +78,8 @@ struct ContentView: View {
     var isPanoMode: Bool { activeModes[selectedModeIndex] == "GROUP PANO" }
     var isSpatial3DMode: Bool { activeModes[selectedModeIndex] == "SPATIAL 3D" }
     
-    var currentModeAccentColor: Color { colorForCameraMode(activeModes[selectedModeIndex]) }
+    var currentModeAccentColor: Color { .yellow }
     
-    // Filtre & Shader GPU Değerleri
     private var currentParallaxOffset: CGFloat { switch parallaxIntensity { case "Low": return 2.5; case "High": return 9.0; default: return 5.0 } }
     private var currentParallaxOpacity: Double { switch parallaxIntensity { case "Low": return 0.09; case "High": return 0.22; default: return 0.15 } }
     
@@ -141,7 +127,7 @@ struct ContentView: View {
         switch selectedFilter { case "Warm": return Color(red: 1.05, green: 0.98, blue: 0.92); default: return .white }
     }
     
-    // MARK: - ANA BODY
+    // MARK: - ANA BODY (TEMİZ, HIZLI VE SIFIR HATA)
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -154,45 +140,22 @@ struct ContentView: View {
                 }
             }
             .fullScreenCover(isPresented: $isShowingPreview) {
-                if let imageToView = lastSavedImage { FullScreenImageView(image: imageToView, onDelete: { lastSavedImage = nil }) }
+                if let imageToView = lastSavedImage {
+                    FullScreenImageView(image: imageToView, onDelete: { lastSavedImage = nil })
+                }
             }
-            .onChange(of: isShowingPreview) { _, isPresented in
-                if isPresented { cameraManager.stopSession(); motionManager.stopUpdates() }
-                else if scenePhase == .active { cameraManager.startSession(); motionManager.startUpdates() }
-            }
-            .onChange(of: scenePhase) { _, newPhase in
-                if newPhase == .active { if !isShowingPreview && cameraManager.isAuthorized { cameraManager.startSession(); motionManager.startUpdates() } }
-                else { cameraManager.stopSession(); motionManager.stopUpdates() }
-            }
-            .onAppear {
-                cameraManager.checkPermission()
-                motionManager.startUpdates()
-                cameraManager.onPhotoCaptured = { image in triggerPhotoAnimation(with: image) }
-                cameraManager.onFrameAvailable = { pixelBuffer in visionManager.processFrame(pixelBuffer) }
-            }
-            .onDisappear { cameraManager.stopSession(); motionManager.stopUpdates() }
-            .onChange(of: isPoseAIOpen) { _, newValue in visionManager.isPoseAIEnabled = newValue }
-            .onChange(of: isPortraitMode) { _, active in cameraManager.isPortraitActive = active; cameraManager.portraitLighting = selectedPortraitLighting }
-            .onChange(of: isSpatial3DMode) { _, active in cameraManager.isSpatial3DActive = active; cameraManager.spatial3DMode = selectedSpatial3DMode; cameraManager.parallaxIntensity = parallaxIntensity }
-            .onChange(of: isBeautyAIMode) { _, active in cameraManager.isBeautyAIActive = active; cameraManager.beautyAIMode = selectedBeautyAIMode; cameraManager.skinTonePalette = skinTonePalette; cameraManager.beautyIntensity = skinSmoothValue / 100.0 }
-            .onChange(of: skinTonePalette) { _, newTone in cameraManager.skinTonePalette = newTone }
-            .onChange(of: skinSmoothValue) { _, newValue in cameraManager.beautyIntensity = newValue / 100.0 }
-            .onChange(of: parallaxIntensity) { _, newIntensity in cameraManager.parallaxIntensity = newIntensity }
-            .onChange(of: visionManager.framingAdvice) { _, _ in triggerVoiceCoach() }
-            .onChange(of: visionManager.poseAdvice) { _, _ in triggerVoiceCoach() }
-            .onChange(of: motionManager.currentRollState) { _, _ in triggerVoiceCoach() }
-            .onChange(of: motionManager.currentPitchState) { _, _ in triggerVoiceCoach() }
+            .onAppear(perform: handleOnAppear)
+            .onDisappear(perform: handleOnDisappear)
+            .onChange(of: isShowingPreview) { _, isPresented in handlePreviewChange(isPresented) }
+            .onChange(of: scenePhase) { _, newPhase in handleScenePhaseChange(newPhase) }
         }
     }
     
     // MARK: - SUB-VIEWS
-    
     @ViewBuilder private func mainCameraView(geometry: GeometryProxy) -> some View {
         ZStack {
-            // 1. Kamera Önizleme
             cameraPreviewLayer(geometry: geometry)
             
-            // Gizli Dokunmatik Alan (Ekrana Tıklanarak Menülerin Kapanması İçin Kesin Çözüm)
             Color.white.opacity(0.001)
                 .ignoresSafeArea()
                 .onTapGesture { location in
@@ -202,7 +165,6 @@ struct ContentView: View {
                     else { handleTapToFocus(location: location, size: geometry.size) }
                 }
             
-            // 2. Efekt ve Yüz Takip Katmanları
             Group {
                 portraitLightingLiveOverlay.ignoresSafeArea()
                 spatial3DLiveOverlay.ignoresSafeArea()
@@ -216,15 +178,12 @@ struct ContentView: View {
                 focusRectLayer
             }
             
-            // 3. Rozetler ve Kılavuzlar
             topBadgesLayer
             guidanceLayer
             
-            // 4. Arayüz ve Kontroller
             sidebarLayer
             bottomControlsLayer
             
-            // 5. Animasyonlar
             captureAnimationsLayer(geometry: geometry)
         }
     }
@@ -287,8 +246,11 @@ struct ContentView: View {
                 ).transition(.scale.combined(with: .opacity))
             } else if isFullBodyMode {
                 FullBodyGuidanceView(
-                    mode: selectedFullBodyMode, pitchDeviation: motionManager.smoothedPitchDeviation,
-                    hasFace: !visionManager.detectedFaces.isEmpty, isGuideEnabled: isHeadFootGuideEnabled
+                    mode: selectedFullBodyMode,
+                    pitchDeviation: motionManager.smoothedPitchDeviation,
+                    hasFace: !visionManager.detectedFaces.isEmpty,
+                    isGuideEnabled: isHeadFootGuideEnabled,
+                    bodyFitState: visionManager.bodyFitState
                 ).transition(.scale.combined(with: .opacity))
             } else if isPhoneTilted {
                 GuidanceView(
@@ -315,7 +277,7 @@ struct ContentView: View {
                     Button(action: { withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { isSidebarOpen.toggle() } }) {
                         Image(systemName: "gearshape.fill")
                             .font(.system(size: 32))
-                            .foregroundColor(isSidebarOpen ? currentModeAccentColor : .white.opacity(0.9))
+                            .foregroundColor(isSidebarOpen ? .yellow : .white.opacity(0.9))
                             .shadow(color: .black.opacity(0.6), radius: 4)
                             .rotationEffect(.degrees(gearAngle))
                     }
@@ -354,13 +316,16 @@ struct ContentView: View {
             else if isFullBodyMode { FullBodyDialView(selectedMode: $selectedFullBodyMode).padding(.bottom, 10) }
             else if isBeautyAIMode {
                 BeautyAIDialView(selectedMode: $selectedBeautyAIMode).padding(.bottom, 10)
-                    .onChange(of: selectedBeautyAIMode) { _, newBeauty in cameraManager.beautyAIMode = newBeauty; if newBeauty != .smoothSkin { showSmoothSlider = false } }
+                    .onChange(of: selectedBeautyAIMode) { _, newBeauty in
+                        cameraManager.beautyAIMode = newBeauty
+                        if newBeauty != .smoothSkin { showSmoothSlider = false }
+                    }
             } else if cameraManager.currentPosition == .back {
                 HStack(spacing: 12) {
                     ForEach([0.5, 1.0, 2.0, 3.0], id: \.self) { zoom in
                         let isSelected = (selectedZoom == zoom)
                         Button(action: { withAnimation { selectedZoom = zoom }; UIImpactFeedbackGenerator(style: .light).impactOccurred(); cameraManager.setZoom(zoom) }) {
-                            Text(isSelected ? "\(zoom == 0.5 ? "0.5" : String(format: "%.0f", zoom))x" : (zoom == 0.5 ? "0.5" : String(format: "%.0f", zoom))).font(.system(size: 13, weight: .bold)).foregroundColor(isSelected ? currentModeAccentColor : .white).frame(width: 42, height: 42).background(Color.black.opacity(0.6)).clipShape(Circle()).overlay(Circle().stroke(isSelected ? currentModeAccentColor : Color.clear, lineWidth: 2))
+                            Text(isSelected ? "\(zoom == 0.5 ? "0.5" : String(format: "%.0f", zoom))x" : (zoom == 0.5 ? "0.5" : String(format: "%.0f", zoom))).font(.system(size: 13, weight: .bold)).foregroundColor(isSelected ? .yellow : .white).frame(width: 42, height: 42).background(Color.black.opacity(0.6)).clipShape(Circle()).overlay(Circle().stroke(isSelected ? Color.yellow : Color.clear, lineWidth: 2))
                         }
                     }
                 }.padding(.bottom, 12)
@@ -407,7 +372,7 @@ struct ContentView: View {
         if isCountingDown {
             ZStack {
                 Color.black.opacity(0.35).ignoresSafeArea()
-                Text("\(countdownRemaining)").font(.system(size: 110, weight: .black, design: .rounded)).foregroundColor(currentModeAccentColor).shadow(color: .black.opacity(0.8), radius: 12).scaleEffect(1.2).animation(.easeInOut(duration: 0.4), value: countdownRemaining)
+                Text("\(countdownRemaining)").font(.system(size: 110, weight: .black, design: .rounded)).foregroundColor(.yellow).shadow(color: .black.opacity(0.8), radius: 12).scaleEffect(1.2).animation(.easeInOut(duration: 0.4), value: countdownRemaining)
             }.allowsHitTesting(true).onTapGesture { cancelTimer() }
         }
         
@@ -433,26 +398,13 @@ struct ContentView: View {
         }
     }
     
-    // EKSİK FONKSİYON: MODE CHANGE
-    private func handleModeChange(mode: String) {
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        guard cameraManager.currentPosition == .back else { return }
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-            if mode == "PORTRAIT" { selectedZoom = 2.0; cameraManager.setZoom(2.0) }
-            else { selectedZoom = 1.0; cameraManager.setZoom(1.0) }
-        }
-    }
-    
     // MARK: - DİNAMİK SCROLL SİDEBAR
     @ViewBuilder private var dynamicSidebarContent: some View {
-        let pinkColor = Color(red: 1.0, green: 0.35, blue: 0.75)
-        let violetColor = Color(red: 0.78, green: 0.42, blue: 1.0)
-        
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 24) {
                 Group {
-                    if isBeautyAIMode { beautyAISidebarGroup(pink: pinkColor) }
-                    else if isFullBodyMode { fullBodySidebarGroup(violet: violetColor) }
+                    if isBeautyAIMode { beautyAISidebarGroup }
+                    else if isFullBodyMode { fullBodySidebarGroup }
                     else if isPanoMode { panoSidebarGroup }
                     else if isSpatial3DMode { spatial3DSidebarGroup }
                     else if isPortraitMode || isRunwayMode { portraitSidebarGroup }
@@ -464,7 +416,6 @@ struct ContentView: View {
             }
             .padding(.vertical, 25)
         }
-        // SIDEBAR BOYU 350'den 480'E UZATILDI (En az 7 özellik sığar)
         .frame(width: 64, height: 480)
         .background(Color.black.opacity(0.25))
         .background(.ultraThinMaterial)
@@ -473,45 +424,44 @@ struct ContentView: View {
         .shadow(color: .black.opacity(0.3), radius: 10, x: -5, y: 0)
     }
     
-    // Sidebar Alt Parçaları
-    @ViewBuilder private func beautyAISidebarGroup(pink: Color) -> some View {
+    @ViewBuilder private var beautyAISidebarGroup: some View {
         switch selectedBeautyAIMode {
         case .naturalGlow:
-            sidebarButton(icon: "sparkles", label: glowWarmth, color: pink) { cycleGlowWarmth() }
-            sidebarButton(icon: "sun.max.fill", label: glowBoost, color: pink) { glowBoost = (glowBoost == "Soft" ? "Vivid" : "Soft") }
+            sidebarButton(icon: "sparkles", label: glowWarmth, color: .white) { cycleGlowWarmth() }
+            sidebarButton(icon: "sun.max.fill", label: glowBoost, color: .white) { glowBoost = (glowBoost == "Soft" ? "Vivid" : "Soft") }
         case .smoothSkin:
-            sidebarButton(icon: "face.smiling.fill", label: "\(Int(skinSmoothValue))%", color: showSmoothSlider ? .yellow : pink) { showSmoothSlider.toggle() }
-            sidebarButton(icon: "circle.dotted", label: skinTextureMode, color: pink) { skinTextureMode = (skinTextureMode == "Natural" ? "Silk" : "Natural") }
+            sidebarButton(icon: "face.smiling.fill", label: "\(Int(skinSmoothValue))%", color: showSmoothSlider ? .yellow : .white) { showSmoothSlider.toggle() }
+            sidebarButton(icon: "circle.dotted", label: skinTextureMode, color: .white) { skinTextureMode = (skinTextureMode == "Natural" ? "Silk" : "Natural") }
         case .eyeBrighten:
-            sidebarButton(icon: "eyes", label: eyeBrightenMode, color: pink) { cycleEyeBrighten() }
-            sidebarButton(icon: "moon.fill", label: darkCircleMode, color: pink) { darkCircleMode = (darkCircleMode == "Max" ? "Light" : "Max") }
+            sidebarButton(icon: "eyes", label: eyeBrightenMode, color: .white) { cycleEyeBrighten() }
+            sidebarButton(icon: "moon.fill", label: darkCircleMode, color: .white) { darkCircleMode = (darkCircleMode == "Max" ? "Light" : "Max") }
         case .facialTone:
-            sidebarButton(icon: "paintpalette.fill", label: skinTonePalette, color: pink) { cycleSkinTone() }
+            sidebarButton(icon: "paintpalette.fill", label: skinTonePalette, color: .white) { cycleSkinTone() }
         case .proRetouch:
-            sidebarButton(icon: "wand.and.rays", label: proRetouchPreset, color: pink) { cycleProRetouch() }
+            sidebarButton(icon: "wand.and.rays", label: proRetouchPreset, color: .white) { cycleProRetouch() }
         }
-        sidebarButton(icon: isPoseAIOpen ? "face.smiling.fill" : "face.smiling", label: isPoseAIOpen ? "Face AI" : "Off", color: isPoseAIOpen ? pink : .white.opacity(0.6)) { isPoseAIOpen.toggle() }
+        sidebarButton(icon: isPoseAIOpen ? "face.smiling.fill" : "face.smiling", label: isPoseAIOpen ? "Face AI" : "Off", color: isPoseAIOpen ? .yellow : .white.opacity(0.6)) { togglePoseAI() }
     }
     
-    @ViewBuilder private func fullBodySidebarGroup(violet: Color) -> some View {
-        sidebarButton(icon: isHeadFootGuideEnabled ? "square.topthird.inset.filled" : "square.dashed", label: isHeadFootGuideEnabled ? "Guide" : "Clean", color: isHeadFootGuideEnabled ? violet : .white.opacity(0.6)) { isHeadFootGuideEnabled.toggle() }
-        if selectedFullBodyMode == .fashion { sidebarButton(icon: isOutfitPopEnabled ? "sparkles.rectangle.stack.fill" : "sparkles.rectangle.stack", label: isOutfitPopEnabled ? "Pop On" : "Pop Off", color: isOutfitPopEnabled ? violet : .white.opacity(0.6)) { isOutfitPopEnabled.toggle() } }
-        sidebarButton(icon: isPoseAIOpen ? "figure.stand" : "figure.stand.line.dotted.figure.stand", label: "Pose AI", color: isPoseAIOpen ? violet : .white.opacity(0.6)) { isPoseAIOpen.toggle() }
+    @ViewBuilder private var fullBodySidebarGroup: some View {
+        sidebarButton(icon: isHeadFootGuideEnabled ? "square.topthird.inset.filled" : "square.dashed", label: isHeadFootGuideEnabled ? "Guide" : "Clean", color: isHeadFootGuideEnabled ? .yellow : .white.opacity(0.6)) { isHeadFootGuideEnabled.toggle() }
+        if selectedFullBodyMode == .fashion { sidebarButton(icon: isOutfitPopEnabled ? "sparkles.rectangle.stack.fill" : "sparkles.rectangle.stack", label: isOutfitPopEnabled ? "Pop On" : "Pop Off", color: isOutfitPopEnabled ? .yellow : .white.opacity(0.6)) { isOutfitPopEnabled.toggle() } }
+        sidebarButton(icon: isPoseAIOpen ? "figure.stand" : "figure.stand.line.dotted.figure.stand", label: "Pose AI", color: isPoseAIOpen ? .yellow : .white.opacity(0.6)) { togglePoseAI() }
     }
     
     @ViewBuilder private var panoSidebarGroup: some View {
-        sidebarButton(icon: panoDirection == .leftToRight ? "arrow.right.circle.fill" : "arrow.left.circle.fill", label: panoDirection == .leftToRight ? "L ➔ R" : "R ➔ L", color: Color(red: 1.0, green: 0.55, blue: 0.1)) { panoDirection = (panoDirection == .leftToRight ? .rightToLeft : .leftToRight) }
-        sidebarButton(icon: selectedPanoMode == .vertorama ? "arrow.up.and.down.square.fill" : "pano.fill", label: selectedPanoMode == .vertorama ? "Vert" : "Hori", color: Color(red: 1.0, green: 0.55, blue: 0.1)) { selectedPanoMode = (selectedPanoMode == .vertorama ? .wideGroup : .vertorama) }
+        sidebarButton(icon: panoDirection == .leftToRight ? "arrow.right.circle.fill" : "arrow.left.circle.fill", label: panoDirection == .leftToRight ? "L ➔ R" : "R ➔ L", color: .yellow) { panoDirection = (panoDirection == .leftToRight ? .rightToLeft : .leftToRight) }
+        sidebarButton(icon: selectedPanoMode == .vertorama ? "arrow.up.and.down.square.fill" : "pano.fill", label: selectedPanoMode == .vertorama ? "Vert" : "Hori", color: .yellow) { selectedPanoMode = (selectedPanoMode == .vertorama ? .wideGroup : .vertorama) }
     }
     
     @ViewBuilder private var spatial3DSidebarGroup: some View {
-        sidebarButton(icon: "square.3.layers.3d.down.right", label: parallaxIntensity, color: .cyan) { cycleParallax() }
-        sidebarButton(icon: isHoloMeshEnabled ? "cube.transparent.fill" : "cube.transparent", label: isHoloMeshEnabled ? "Mesh" : "Clean", color: isHoloMeshEnabled ? .cyan : .white.opacity(0.6)) { isHoloMeshEnabled.toggle() }
+        sidebarButton(icon: "square.3.layers.3d.down.right", label: parallaxIntensity, color: .white) { cycleParallax() }
+        sidebarButton(icon: isHoloMeshEnabled ? "cube.transparent.fill" : "cube.transparent", label: isHoloMeshEnabled ? "Mesh" : "Clean", color: isHoloMeshEnabled ? .yellow : .white.opacity(0.6)) { isHoloMeshEnabled.toggle() }
     }
     
     @ViewBuilder private var portraitSidebarGroup: some View {
         sidebarButton(icon: "f.cursive.circle.fill", label: apertureValue, color: .yellow) { cycleAperture() }
-        sidebarButton(icon: isPoseAIOpen ? "figure.stand" : "figure.stand.line.dotted.figure.stand", label: "Pose", color: isPoseAIOpen ? .yellow : .white) { isPoseAIOpen.toggle() }
+        sidebarButton(icon: isPoseAIOpen ? "figure.stand" : "figure.stand.line.dotted.figure.stand", label: "Pose", color: isPoseAIOpen ? .yellow : .white) { togglePoseAI() }
         if isPortraitMode {
             switch selectedPortraitLighting {
             case .natural: EmptyView()
@@ -524,12 +474,10 @@ struct ContentView: View {
     }
     
     @ViewBuilder private var generalSidebarGroup: some View {
-        sidebarButton(icon: "timer", label: timerSetting == 0 ? "Off" : "\(timerSetting)s", color: timerSetting > 0 ? currentModeAccentColor : .white) { cycleTimer() }
-        sidebarButton(icon: flashSetting == "On" ? "bolt.fill" : (flashSetting == "Auto" ? "bolt.badge.a.fill" : "bolt.slash.fill"), label: flashSetting, color: flashSetting != "Off" ? currentModeAccentColor : .white) { cycleFlash() }
-        sidebarButton(icon: "camera.filters", label: selectedFilter == "Original" ? "Filter" : selectedFilter, color: selectedFilter != "Original" ? currentModeAccentColor : .white) { cycleFilter() }
+        sidebarButton(icon: "timer", label: timerSetting == 0 ? "Off" : "\(timerSetting)s", color: timerSetting > 0 ? .yellow : .white) { cycleTimer() }
+        sidebarButton(icon: flashSetting == "On" ? "bolt.fill" : (flashSetting == "Auto" ? "bolt.badge.a.fill" : "bolt.slash.fill"), label: flashSetting, color: flashSetting != "Off" ? .yellow : .white) { cycleFlash() }
+        sidebarButton(icon: "camera.filters", label: selectedFilter == "Original" ? "Filter" : selectedFilter, color: selectedFilter != "Original" ? .yellow : .white) { cycleFilter() }
     }
-    
-    // MARK: - YARDIMCI GÖRÜNÜMLER
     
     private func sidebarButton(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
         Button(action: { withAnimation(.spring()) { action() }; UIImpactFeedbackGenerator(style: .medium).impactOccurred() }) {
@@ -538,8 +486,7 @@ struct ContentView: View {
     }
     
     private var smoothSkinSliderOverlay: some View {
-        let pinkColor = Color(red: 1.0, green: 0.35, blue: 0.75)
-        return VStack(spacing: 8) {
+        VStack(spacing: 8) {
             HStack {
                 Image(systemName: "face.smiling.fill").font(.system(size: 13, weight: .bold))
                 Text("SKIN SMOOTHNESS: \(Int(skinSmoothValue))%").font(.system(size: 11, weight: .black, design: .monospaced))
@@ -547,25 +494,27 @@ struct ContentView: View {
                 Button(action: { withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { skinSmoothValue = 50.0; cameraManager.beautyIntensity = 0.5 }; UIImpactFeedbackGenerator(style: .medium).impactOccurred() }) {
                     Text("RESET (50%)").font(.system(size: 9, weight: .bold, design: .rounded)).foregroundColor(.white.opacity(0.7)).padding(.horizontal, 8).padding(.vertical, 3).background(Color.white.opacity(0.15)).clipShape(Capsule())
                 }
-            }.foregroundColor(pinkColor)
+            }.foregroundColor(.white)
             HStack(spacing: 12) {
                 Text("0%").font(.system(size: 10, weight: .bold, design: .rounded)).foregroundColor(.white.opacity(0.5))
-                Slider(value: $skinSmoothValue, in: 0...100, step: 1).tint(pinkColor)
+                Slider(value: $skinSmoothValue, in: 0...100, step: 1).tint(.white)
+                    .onChange(of: skinSmoothValue) { _, val in
+                        cameraManager.beautyIntensity = val / 100.0
+                    }
                 Text("100%").font(.system(size: 10, weight: .bold, design: .rounded)).foregroundColor(.white.opacity(0.5))
             }
-        }.padding(.horizontal, 20).padding(.vertical, 12).frame(width: 320).background(Color.black.opacity(0.45)).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(pinkColor.opacity(0.4), lineWidth: 1)).shadow(color: pinkColor.opacity(0.3), radius: 10, y: 5)
+        }.padding(.horizontal, 20).padding(.vertical, 12).frame(width: 320).background(Color.black.opacity(0.45)).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.2), lineWidth: 1)).shadow(color: .black.opacity(0.3), radius: 10, y: 5)
     }
     
     @ViewBuilder private var beautyAILiveOverlay: some View {
-        let pinkColor = Color(red: 1.0, green: 0.35, blue: 0.75)
         if isBeautyAIMode, let face = visionManager.detectedFaces.first {
             GeometryReader { geo in
                 let w = face.width * geo.size.width; let h = face.height * geo.size.height; let x = face.minX * geo.size.width; let y = (1 - face.minY - face.height) * geo.size.height
                 ZStack(alignment: .topLeading) {
-                    if selectedBeautyAIMode == .naturalGlow { RadialGradient(gradient: Gradient(colors: [(glowWarmth == "Rose" ? pinkColor : (glowWarmth == "Pearl" ? Color.white : Color.yellow)).opacity(glowBoost == "Vivid" ? 0.22 : 0.12), Color.clear]), center: .center, startRadius: 20, endRadius: w * 0.9).frame(width: w * 1.5, height: h * 1.5).position(x: x + w/2, y: y + h/2) }
-                    if selectedBeautyAIMode == .eyeBrighten { HStack(spacing: w * 0.22) { Circle().stroke(pinkColor, lineWidth: 1.5).frame(width: w * 0.18, height: w * 0.18).overlay(Circle().fill(Color.white.opacity(0.3))).shadow(color: pinkColor, radius: 4); Circle().stroke(pinkColor, lineWidth: 1.5).frame(width: w * 0.18, height: w * 0.18).overlay(Circle().fill(Color.white.opacity(0.3))).shadow(color: pinkColor, radius: 4) }.position(x: x + w/2, y: y + h * 0.36) }
-                    RoundedRectangle(cornerRadius: 16).stroke(pinkColor.opacity(0.6), lineWidth: 1.2).frame(width: w, height: h).position(x: x + w/2, y: y + h/2)
-                        .overlay( HStack(spacing: 3) { Image(systemName: selectedBeautyAIMode.iconName).font(.system(size: 8)); Text(selectedBeautyAIMode == .smoothSkin ? "SMOOTH \(Int(skinSmoothValue))%" : selectedBeautyAIMode.rawValue).font(.system(size: 8, weight: .bold, design: .monospaced)) }.foregroundColor(.black).padding(.horizontal, 6).padding(.vertical, 2).background(pinkColor).cornerRadius(4).position(x: x + w/2, y: y - 12) )
+                    if selectedBeautyAIMode == .naturalGlow { RadialGradient(gradient: Gradient(colors: [Color.white.opacity(glowBoost == "Vivid" ? 0.22 : 0.12), Color.clear]), center: .center, startRadius: 20, endRadius: w * 0.9).frame(width: w * 1.5, height: h * 1.5).position(x: x + w/2, y: y + h/2) }
+                    if selectedBeautyAIMode == .eyeBrighten { HStack(spacing: w * 0.22) { Circle().stroke(Color.white, lineWidth: 1.5).frame(width: w * 0.18, height: w * 0.18).overlay(Circle().fill(Color.white.opacity(0.3))); Circle().stroke(Color.white, lineWidth: 1.5).frame(width: w * 0.18, height: w * 0.18).overlay(Circle().fill(Color.white.opacity(0.3))) }.position(x: x + w/2, y: y + h * 0.36) }
+                    RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.6), lineWidth: 1.2).frame(width: w, height: h).position(x: x + w/2, y: y + h/2)
+                        .overlay( HStack(spacing: 3) { Image(systemName: selectedBeautyAIMode.iconName).font(.system(size: 8)); Text(selectedBeautyAIMode == .smoothSkin ? "SMOOTH \(Int(skinSmoothValue))%" : selectedBeautyAIMode.rawValue).font(.system(size: 8, weight: .bold, design: .monospaced)) }.foregroundColor(.black).padding(.horizontal, 6).padding(.vertical, 2).background(Color.white).cornerRadius(4).position(x: x + w/2, y: y - 12) )
                 }
             }.allowsHitTesting(false).transition(.opacity)
         }
@@ -575,7 +524,7 @@ struct ContentView: View {
         if isSpatial3DMode {
             switch selectedSpatial3DMode {
             case .anaglyph: ZStack { Color.red.opacity(currentParallaxOpacity).blendMode(.screen).offset(x: -currentParallaxOffset, y: 0); Color.cyan.opacity(currentParallaxOpacity).blendMode(.screen).offset(x: currentParallaxOffset, y: 0) }.allowsHitTesting(false).animation(.spring(response: 0.3, dampingFraction: 0.7), value: currentParallaxOffset)
-            case .visionPro: RoundedRectangle(cornerRadius: 44, style: .continuous).stroke(Color.white.opacity(0.4), lineWidth: 2).padding(24).shadow(color: .cyan.opacity(0.4), radius: 15).allowsHitTesting(false)
+            case .visionPro: RoundedRectangle(cornerRadius: 44, style: .continuous).stroke(Color.white.opacity(0.4), lineWidth: 2).padding(24).shadow(color: .white.opacity(0.4), radius: 15).allowsHitTesting(false)
             case .focusedDepth: RadialGradient(gradient: Gradient(colors: [Color.clear, Color.black.opacity(0.45)]), center: .center, startRadius: 150, endRadius: 360).allowsHitTesting(false)
             default: EmptyView()
             }
@@ -590,14 +539,14 @@ struct ContentView: View {
                         let face = visionManager.detectedFaces[idx]
                         let w = face.width * geo.size.width; let h = face.height * geo.size.height; let x = face.minX * geo.size.width; let y = (1 - face.minY - face.height) * geo.size.height
                         ZStack(alignment: .topLeading) {
-                            RoundedRectangle(cornerRadius: 12).stroke(Color.cyan.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-                            Rectangle().fill(LinearGradient(colors: [.clear, Color.cyan.opacity(0.7), .clear], startPoint: .leading, endPoint: .trailing)).frame(height: 2).offset(y: h * 0.45)
-                            Path { p in p.move(to: CGPoint(x: 0, y: 14)); p.addLine(to: CGPoint(x: 0, y: 0)); p.addLine(to: CGPoint(x: 14, y: 0)); p.move(to: CGPoint(x: w - 14, y: 0)); p.addLine(to: CGPoint(x: w, y: 0)); p.addLine(to: CGPoint(x: w, y: 14)); p.move(to: CGPoint(x: 0, y: h - 14)); p.addLine(to: CGPoint(x: 0, y: h)); p.addLine(to: CGPoint(x: 14, y: h)); p.move(to: CGPoint(x: w - 14, y: h)); p.addLine(to: CGPoint(x: w, y: h)); p.addLine(to: CGPoint(x: w, y: h - 14)) }.stroke(Color.cyan, lineWidth: 2.5)
-                            HStack(spacing: 3) { Image(systemName: "cube.transparent.fill").font(.system(size: 8)); Text("3D DEPTH: \(parallaxIntensity.uppercased())").font(.system(size: 8, weight: .bold, design: .monospaced)) }.foregroundColor(.black).padding(.horizontal, 6).padding(.vertical, 2).background(Color.cyan).cornerRadius(4).offset(x: 4, y: -20)
+                            RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                            Rectangle().fill(LinearGradient(colors: [.clear, Color.white.opacity(0.7), .clear], startPoint: .leading, endPoint: .trailing)).frame(height: 2).offset(y: h * 0.45)
+                            Path { p in p.move(to: CGPoint(x: 0, y: 14)); p.addLine(to: CGPoint(x: 0, y: 0)); p.addLine(to: CGPoint(x: 14, y: 0)); p.move(to: CGPoint(x: w - 14, y: 0)); p.addLine(to: CGPoint(x: w, y: 0)); p.addLine(to: CGPoint(x: w, y: 14)); p.move(to: CGPoint(x: 0, y: h - 14)); p.addLine(to: CGPoint(x: 0, y: h)); p.addLine(to: CGPoint(x: 14, y: h)); p.move(to: CGPoint(x: w - 14, y: h)); p.addLine(to: CGPoint(x: w, y: h)); p.addLine(to: CGPoint(x: w, y: h - 14)) }.stroke(Color.white, lineWidth: 2.5)
+                            HStack(spacing: 3) { Image(systemName: "cube.transparent.fill").font(.system(size: 8)); Text("3D DEPTH: \(parallaxIntensity.uppercased())").font(.system(size: 8, weight: .bold, design: .monospaced)) }.foregroundColor(.black).padding(.horizontal, 6).padding(.vertical, 2).background(Color.white).cornerRadius(4).offset(x: 4, y: -20)
                         }.frame(width: w, height: h).position(x: x + w/2, y: y + h/2)
                     }
                     if visionManager.detectedFaces.isEmpty {
-                        VStack { Spacer(); HStack(spacing: 10) { Image(systemName: "point.3.filled.connected.trianglepath.dotted").font(.system(size: 13)); Text("3D MESH SCANNING: \(parallaxIntensity.uppercased())").font(.system(size: 9, weight: .bold, design: .monospaced)) }.foregroundColor(.cyan).padding(.horizontal, 14).padding(.vertical, 6).background(Color.black.opacity(0.5)).clipShape(Capsule()).overlay(Capsule().stroke(Color.cyan.opacity(0.5), lineWidth: 1)).padding(.bottom, 220) }
+                        VStack { Spacer(); HStack(spacing: 10) { Image(systemName: "point.3.filled.connected.trianglepath.dotted").font(.system(size: 13)); Text("3D MESH SCANNING: \(parallaxIntensity.uppercased())").font(.system(size: 9, weight: .bold, design: .monospaced)) }.foregroundColor(.white).padding(.horizontal, 14).padding(.vertical, 6).background(Color.black.opacity(0.5)).clipShape(Capsule()).overlay(Capsule().stroke(Color.white.opacity(0.5), lineWidth: 1)).padding(.bottom, 220) }
                     }
                 }
             }.allowsHitTesting(false).transition(.opacity)
@@ -610,7 +559,7 @@ struct ContentView: View {
     }
     
     private var distanceText: String { guard let face = visionManager.detectedFaces.first else { return "3D Depth: Searching..." }; let w = face.width; if w > 0.38 { return "3D: Step Back (Too Close)" } else if w < 0.14 { return "3D: Move Closer (Too Far)" } else { return "1.8m — Optimal 3D Range ✨" } }
-    private var distanceColor: Color { guard let face = visionManager.detectedFaces.first else { return Color.black.opacity(0.5) }; let w = face.width; if w >= 0.14 && w <= 0.38 { return Color.cyan } else { return Color.orange } }
+    private var distanceColor: Color { guard let face = visionManager.detectedFaces.first else { return Color.black.opacity(0.5) }; let w = face.width; if w >= 0.14 && w <= 0.38 { return Color.white.opacity(0.3) } else { return Color.orange } }
     
     @ViewBuilder private var portraitLightingLiveOverlay: some View {
         if isPortraitMode {
@@ -624,20 +573,92 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - İŞLEVSEL FONKSİYONLAR
+    // MARK: - İŞLEVSEL AKSİYONLAR VE YAŞAM DÖNGÜSÜ
+    private func handleOnAppear() {
+        cameraManager.checkPermission()
+        motionManager.startUpdates()
+        cameraManager.onPhotoCaptured = { image in triggerPhotoAnimation(with: image) }
+        cameraManager.onFrameAvailable = { pixelBuffer in
+            visionManager.processFrame(pixelBuffer)
+            DispatchQueue.main.async { self.triggerVoiceCoach() }
+        }
+    }
+    
+    private func handleOnDisappear() {
+        cameraManager.stopSession()
+        motionManager.stopUpdates()
+    }
+    
+    private func handlePreviewChange(_ isPresented: Bool) {
+        if isPresented { cameraManager.stopSession(); motionManager.stopUpdates() }
+        else if scenePhase == .active { cameraManager.startSession(); motionManager.startUpdates() }
+    }
+    
+    private func handleScenePhaseChange(_ newPhase: ScenePhase) {
+        if newPhase == .active {
+            if !isShowingPreview && cameraManager.isAuthorized { cameraManager.startSession(); motionManager.startUpdates() }
+        } else { cameraManager.stopSession(); motionManager.stopUpdates() }
+    }
+    
+    private func handleModeChange(mode: String) {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        
+        cameraManager.isPortraitActive = (mode == "PORTRAIT")
+        cameraManager.isSpatial3DActive = (mode == "SPATIAL 3D")
+        cameraManager.isBeautyAIActive = (mode == "BEAUTY AI")
+        
+        if mode == "PORTRAIT" {
+            cameraManager.portraitLighting = selectedPortraitLighting
+        } else if mode == "SPATIAL 3D" {
+            cameraManager.spatial3DMode = selectedSpatial3DMode
+            cameraManager.parallaxIntensity = parallaxIntensity
+        } else if mode == "BEAUTY AI" {
+            cameraManager.beautyAIMode = selectedBeautyAIMode
+            cameraManager.skinTonePalette = skinTonePalette
+            cameraManager.beautyIntensity = skinSmoothValue / 100.0
+        }
+        
+        guard cameraManager.currentPosition == .back else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+            if mode == "PORTRAIT" { selectedZoom = 2.0; cameraManager.setZoom(2.0) }
+            else { selectedZoom = 1.0; cameraManager.setZoom(1.0) }
+        }
+    }
+    
+    private func togglePoseAI() {
+        isPoseAIOpen.toggle()
+        visionManager.isPoseAIEnabled = isPoseAIOpen
+    }
+    
+    private func cycleSkinTone() {
+        let values = ["Peach", "Bronze", "Porcelain", "Rosy"]
+        if let idx = values.firstIndex(of: skinTonePalette) {
+            skinTonePalette = values[(idx + 1) % values.count]
+            cameraManager.skinTonePalette = skinTonePalette
+        }
+    }
+    
+    private func cycleParallax() {
+        let levels = ["Low", "Mid", "High"]
+        if let idx = levels.firstIndex(of: parallaxIntensity) {
+            parallaxIntensity = levels[(idx + 1) % levels.count]
+            cameraManager.parallaxIntensity = parallaxIntensity
+        }
+    }
     
     private func cycleFlash() { if flashSetting == "Auto" { flashSetting = "On" } else if flashSetting == "On" { flashSetting = "Off" } else { flashSetting = "Auto" } }
     private func cycleTimer() { if timerSetting == 0 { timerSetting = 3 } else if timerSetting == 3 { timerSetting = 10 } else { timerSetting = 0 } }
     private func cycleAperture() { let values = ["f/1.4", "f/2.0", "f/2.8", "f/4.0", "f/5.6", "f/8.0"]; if let idx = values.firstIndex(of: apertureValue) { apertureValue = values[(idx + 1) % values.count] } }
-    private func cyclePortraitLighting() { let modes = PortraitLightingMode.allCases; if let idx = modes.firstIndex(of: selectedPortraitLighting) { selectedPortraitLighting = modes[(idx + 1) % modes.count] } }
+    private func cyclePortraitLighting() { let modes = PortraitLightingMode.allCases; if let idx = modes.firstIndex(of: selectedPortraitLighting) { selectedPortraitLighting = modes[(idx + 1) % modes.count]; cameraManager.portraitLighting = selectedPortraitLighting } }
     private func cycleFilter() { let filters = ["Original", "Vivid", "Warm", "Mono", "Noir"]; if let idx = filters.firstIndex(of: selectedFilter) { selectedFilter = filters[(idx + 1) % filters.count] } }
-    private func cycleParallax() { let levels = ["Low", "Mid", "High"]; if let idx = levels.firstIndex(of: parallaxIntensity) { parallaxIntensity = levels[(idx + 1) % levels.count] } }
     private func cycleGlowWarmth() { let values = ["Golden", "Pearl", "Rose"]; if let idx = values.firstIndex(of: glowWarmth) { glowWarmth = values[(idx + 1) % values.count] } }
     private func cycleEyeBrighten() { let values = ["Sparkle", "Vivid", "Deep"]; if let idx = values.firstIndex(of: eyeBrightenMode) { eyeBrightenMode = values[(idx + 1) % values.count] } }
-    private func cycleSkinTone() { let values = ["Peach", "Bronze", "Porcelain", "Rosy"]; if let idx = values.firstIndex(of: skinTonePalette) { skinTonePalette = values[(idx + 1) % values.count] } }
     private func cycleProRetouch() { let values = ["Editorial", "Red Carpet", "Glamour"]; if let idx = values.firstIndex(of: proRetouchPreset) { proRetouchPreset = values[(idx + 1) % values.count] } }
     
-    private func triggerVoiceCoach() { voiceCoach.provideGuidance(framing: visionManager.framingAdvice, pose: visionManager.poseAdvice, roll: motionManager.currentRollState, pitch: motionManager.currentPitchState); checkAutoCapture() }
+    private func triggerVoiceCoach() {
+        voiceCoach.provideGuidance(framing: visionManager.framingAdvice, pose: visionManager.poseAdvice, roll: motionManager.currentRollState, pitch: motionManager.currentPitchState)
+        checkAutoCapture()
+    }
     
     private func takePhoto() {
         guard !isCountingDown else { return }
@@ -672,8 +693,15 @@ struct ContentView: View {
         let isTiltPerfect = (motionManager.currentRollState == .aligned && motionManager.currentPitchState == .aligned)
         let isFramingPerfect = visionManager.detectedFaces.isEmpty ? true : (visionManager.framingAdvice == .perfect)
         let isPosePerfect = (visionManager.poseAdvice == .good || visionManager.poseAdvice == .none)
+        let isFullBodyPerfect = isFullBodyMode ? (visionManager.bodyFitState == .perfectFit) : true
         
-        if isTiltPerfect && isFramingPerfect && isPosePerfect { let now = Date(); if now.timeIntervalSince(lastCaptureTime) > 3.0 { lastCaptureTime = now; takePhoto() } }
+        if isTiltPerfect && isFramingPerfect && isPosePerfect && isFullBodyPerfect {
+            let now = Date()
+            if now.timeIntervalSince(lastCaptureTime) > 3.0 {
+                lastCaptureTime = now
+                takePhoto()
+            }
+        }
     }
     
     private func handleTapToFocus(location: CGPoint, size: CGSize) {
@@ -681,18 +709,6 @@ struct ContentView: View {
         focusPoint = location; showFocusRect = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { withAnimation { showFocusRect = false } }
         cameraManager.focusAndExpose(at: location, screenWidth: size.width, screenHeight: size.height)
-    }
-    
-    private func colorForCameraMode(_ mode: String) -> Color {
-        switch mode {
-        case "PORTRAIT": return Color(red: 1.0, green: 0.78, blue: 0.15)
-        case "RUNWAY": return Color(red: 1.0, green: 0.25, blue: 0.3)
-        case "FULL BODY": return Color(red: 0.78, green: 0.42, blue: 1.0)
-        case "BEAUTY AI": return Color(red: 1.0, green: 0.35, blue: 0.75)
-        case "GROUP PANO": return Color(red: 1.0, green: 0.55, blue: 0.1)
-        case "SPATIAL 3D": return Color(red: 0.2, green: 0.9, blue: 1.0)
-        default: return .yellow
-        }
     }
 }
 
@@ -728,7 +744,7 @@ struct AppleGlassModePicker: View {
                 ForEach(0..<modes.count, id: \.self) { i in
                     Text(modes[i])
                         .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundColor(colorForMode(modes[i]))
+                        .foregroundColor(.yellow)
                         .frame(width: itemWidth)
                 }
             }
@@ -753,17 +769,5 @@ struct AppleGlassModePicker: View {
                     onModeChanged(modes[newIndex])
                 }
         )
-    }
-    
-    private func colorForMode(_ mode: String) -> Color {
-        switch mode {
-        case "PORTRAIT": return Color(red: 1.0, green: 0.78, blue: 0.15)
-        case "RUNWAY": return Color(red: 1.0, green: 0.25, blue: 0.3)
-        case "FULL BODY": return Color(red: 0.78, green: 0.42, blue: 1.0)
-        case "BEAUTY AI": return Color(red: 1.0, green: 0.35, blue: 0.75)
-        case "GROUP PANO": return Color(red: 1.0, green: 0.55, blue: 0.1)
-        case "SPATIAL 3D": return Color(red: 0.2, green: 0.9, blue: 1.0)
-        default: return .yellow
-        }
     }
 }

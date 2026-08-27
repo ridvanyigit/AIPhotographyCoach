@@ -8,8 +8,8 @@ class VisionManager {
     var detectedFaces: [CGRect] = []
     var framingAdvice: FramingAdvice = .searching
     var poseAdvice: PoseAdvice = .none 
+    var bodyFitState: BodyFitState = .searching // YENİ: Canlı Boy Uyumu
     
-    // YENİ: Pose AI Açık / Kapalı Kontrolü
     var isPoseAIEnabled: Bool = true
     
     private let framingCoach = PhotographyCoach()
@@ -25,7 +25,6 @@ class VisionManager {
     }
     
     func processFrame(_ pixelBuffer: CVPixelBuffer) {
-        // 1. Yüz Algılama İsteği (Her zaman çalışır)
         let faceRequest = VNDetectFaceRectanglesRequest { [weak self] request, error in
             guard let results = request.results as? [VNFaceObservation], error == nil else { return }
             DispatchQueue.main.async {
@@ -38,21 +37,25 @@ class VisionManager {
         
         var requests: [VNRequest] = [faceRequest]
         
-        // 2. İnsan Pozisyonu İsteği (Sadece Pose AI açıksa çalışır — Pil tasarrufu)
         if isPoseAIEnabled {
             let poseRequest = VNDetectHumanBodyPoseRequest { [weak self] request, error in
                 guard let results = request.results as? [VNHumanBodyPoseObservation], let firstPose = results.first else {
-                    DispatchQueue.main.async { self?.poseAdvice = .none }
+                    DispatchQueue.main.async {
+                        self?.poseAdvice = .none
+                        self?.bodyFitState = .searching
+                    }
                     return
                 }
                 DispatchQueue.main.async {
                     self?.poseAdvice = self?.poseCoach.evaluatePose(observation: firstPose) ?? .none
+                    self?.bodyFitState = self?.poseCoach.evaluateBodyFit(observation: firstPose) ?? .searching
                 }
             }
             requests.append(poseRequest)
         } else {
             DispatchQueue.main.async {
                 self.poseAdvice = .none
+                self.bodyFitState = .searching
             }
         }
         
