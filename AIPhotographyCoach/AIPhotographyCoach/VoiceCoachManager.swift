@@ -14,6 +14,12 @@ class VoiceCoachManager: NSObject, AVSpeechSynthesizerDelegate {
         try? AVAudioSession.sharedInstance().setActive(true)
     }
     
+    func stop() {
+        synthesizer.stopSpeaking(at: .immediate)
+        isSpeaking = false
+        lastSpokenPhrase = ""
+    }
+    
     func provideGuidance(framing: FramingAdvice, pose: PoseAdvice, roll: RollState, pitch: PitchState) {
         var phraseToSpeak = ""
         

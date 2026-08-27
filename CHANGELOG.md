@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.3] - 2026-08-27
+### Added
+- **Vision Face Landmarks Engine:** Integrated Apple Vision's 76-point biometric `VNDetectFaceLandmarksRequest` for micron-level facial feature tracking.
+- **Pupil Tracking & Eye Contact Gaze Analysis:** Real-time tracking of left and right pupils to ensure direct eye contact with the camera lens.
+- **Luxury Vision Corner Brackets:** Minimalist viewfinder corner brackets replacing crude bounding rectangles.
+- **Voice Assistant Mute Toggle:** Quick mute/unmute button added to the left of the shutter button with symmetric Apple Glass aesthetic.
+- **Dynamic BodyFitState Integration:** Fully unified full-body golden ratio framing engine with the compiler-optimized reactive architecture.
+
 ## [v0.5.2] - 2026-08-27
 ### Added
 - **Dynamic Full-Body Pose Coaching:** Integrated Apple Vision's `VNDetectHumanBodyPoseRequest` to evaluate real-time Headroom and Feet Baseline framing (`BodyFitState`).

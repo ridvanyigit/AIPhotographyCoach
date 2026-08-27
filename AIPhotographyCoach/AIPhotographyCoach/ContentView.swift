@@ -12,6 +12,7 @@ struct ContentView: View {
     
     @State private var flashOpacity: Double = 0.0
     @State private var isAutoCaptureEnabled: Bool = false
+    @State private var isVoiceCoachMuted: Bool = false // YENİ: Sesli Asistan Sessiz Durumu
     @State private var lastCaptureTime: Date = Date.distantPast
     
     @State private var focusPoint: CGPoint? = nil
@@ -127,7 +128,6 @@ struct ContentView: View {
         switch selectedFilter { case "Warm": return Color(red: 1.05, green: 0.98, blue: 0.92); default: return .white }
     }
     
-    // MARK: - ANA BODY (TEMİZ, HIZLI VE SIFIR HATA)
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -151,7 +151,6 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - SUB-VIEWS
     @ViewBuilder private func mainCameraView(geometry: GeometryProxy) -> some View {
         ZStack {
             cameraPreviewLayer(geometry: geometry)
@@ -174,7 +173,7 @@ struct ContentView: View {
                 if visionManager.framingAdvice != .perfect {
                     CompositionGridView().ignoresSafeArea().transition(.opacity).animation(.easeInOut(duration: 0.5), value: visionManager.framingAdvice)
                 }
-                FaceDetectionView(faces: visionManager.detectedFaces).ignoresSafeArea()
+                FaceDetectionView(landmarks: visionManager.faceLandmarks).ignoresSafeArea()
                 focusRectLayer
             }
             
@@ -333,19 +332,71 @@ struct ContentView: View {
         }
     }
     
+    // MARK: - DEKLANŞÖR & SESLİ ASİSTAN MUTE & AUTO BUTONLARI (KUSURSUZ SİMETRİ)
     @ViewBuilder private var shutterAndAutoGroup: some View {
         ZStack {
             ShutterButtonView(action: takePhoto)
+            
             HStack {
-                Spacer()
-                Button(action: { withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { isAutoCaptureEnabled.toggle() }; UIImpactFeedbackGenerator(style: .medium).impactOccurred() }) {
-                    ZStack {
-                        Circle().fill(Color.black.opacity(0.6)).frame(width: 44, height: 44).overlay(Circle().stroke(isAutoCaptureEnabled ? Color.yellow : Color.white.opacity(0.3), lineWidth: isAutoCaptureEnabled ? 2 : 1)).shadow(color: isAutoCaptureEnabled ? Color.yellow.opacity(0.6) : Color.clear, radius: 8)
-                        VStack(spacing: 2) { Image(systemName: isAutoCaptureEnabled ? "a.circle.fill" : "a.circle").font(.system(size: 18, weight: .bold)); Text("AUTO").font(.system(size: 7, weight: .black, design: .rounded)) }.foregroundColor(isAutoCaptureEnabled ? .yellow : .white.opacity(0.85))
+                // SOL: SESLİ ASİSTAN SUSTURMA BUTONU (MUTE / UNMUTE)
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        isVoiceCoachMuted.toggle()
+                        if isVoiceCoachMuted {
+                            voiceCoach.stop()
+                        }
                     }
-                }.padding(.trailing, 24)
-            }.frame(width: 300)
-        }.padding(.bottom, 20)
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.black.opacity(0.6))
+                            .frame(width: 44, height: 44)
+                            .overlay(
+                                Circle()
+                                    .stroke(!isVoiceCoachMuted ? Color.yellow : Color.white.opacity(0.3), lineWidth: !isVoiceCoachMuted ? 2 : 1)
+                            )
+                            .shadow(color: !isVoiceCoachMuted ? Color.yellow.opacity(0.6) : Color.clear, radius: 8)
+                        
+                        VStack(spacing: 2) {
+                            Image(systemName: !isVoiceCoachMuted ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                .font(.system(size: 16, weight: .bold))
+                            Text(!isVoiceCoachMuted ? "VOICE" : "MUTED")
+                                .font(.system(size: 7, weight: .black, design: .rounded))
+                        }
+                        .foregroundColor(!isVoiceCoachMuted ? .yellow : .white.opacity(0.6))
+                    }
+                }
+                .padding(.leading, 24)
+                
+                Spacer()
+                
+                // SAĞ: OTO-ÇEKİM BUTONU (AUTO A)
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { isAutoCaptureEnabled.toggle() }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.black.opacity(0.6))
+                            .frame(width: 44, height: 44)
+                            .overlay(Circle().stroke(isAutoCaptureEnabled ? Color.yellow : Color.white.opacity(0.3), lineWidth: isAutoCaptureEnabled ? 2 : 1))
+                            .shadow(color: isAutoCaptureEnabled ? Color.yellow.opacity(0.6) : Color.clear, radius: 8)
+                        
+                        VStack(spacing: 2) {
+                            Image(systemName: isAutoCaptureEnabled ? "a.circle.fill" : "a.circle")
+                                .font(.system(size: 18, weight: .bold))
+                            Text("AUTO")
+                                .font(.system(size: 7, weight: .black, design: .rounded))
+                        }
+                        .foregroundColor(isAutoCaptureEnabled ? .yellow : .white.opacity(0.85))
+                    }
+                }
+                .padding(.trailing, 24)
+            }
+            .frame(width: 320)
+        }
+        .padding(.bottom, 20)
     }
     
     @ViewBuilder private var modePickerGroup: some View {
@@ -398,7 +449,6 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - DİNAMİK SCROLL SİDEBAR
     @ViewBuilder private var dynamicSidebarContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 24) {
@@ -655,8 +705,16 @@ struct ContentView: View {
     private func cycleEyeBrighten() { let values = ["Sparkle", "Vivid", "Deep"]; if let idx = values.firstIndex(of: eyeBrightenMode) { eyeBrightenMode = values[(idx + 1) % values.count] } }
     private func cycleProRetouch() { let values = ["Editorial", "Red Carpet", "Glamour"]; if let idx = values.firstIndex(of: proRetouchPreset) { proRetouchPreset = values[(idx + 1) % values.count] } }
     
+    // YENİ: Sesli Asistan Mute Kontrolü
     private func triggerVoiceCoach() {
-        voiceCoach.provideGuidance(framing: visionManager.framingAdvice, pose: visionManager.poseAdvice, roll: motionManager.currentRollState, pitch: motionManager.currentPitchState)
+        if !isVoiceCoachMuted {
+            voiceCoach.provideGuidance(
+                framing: visionManager.framingAdvice,
+                pose: visionManager.poseAdvice,
+                roll: motionManager.currentRollState,
+                pitch: motionManager.currentPitchState
+            )
+        }
         checkAutoCapture()
     }
     
