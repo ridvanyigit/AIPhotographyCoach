@@ -1,0 +1,13 @@
+import SwiftUI
+
+// Sadece arkaplanda yüz çerçevesini hafifçe hissettiren temiz katman
+struct FaceDetectionView: View {
+    let landmarks: [FaceLandmarkData]
+    let isFrontCamera: Bool
+    
+    var body: some View {
+        // Artık gözleri titreten sarı noktalar tamamen yok!
+        // Sadece temiz, akıcı bir deneyim.
+        EmptyView()
+    }
+}

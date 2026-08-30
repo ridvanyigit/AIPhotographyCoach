@@ -1,90 +1,48 @@
 import Foundation
 import CoreMotion
-import SwiftUI
-import UIKit
 
 @Observable
 class MotionManager {
     private let motionManager = CMMotionManager()
-    private let guidanceEngine = GuidanceEngine()
-    
-    var smoothedRoll: Double = 0.0
-    var smoothedPitchDeviation: Double = 0.0
-    var currentRollState: RollState = .unknown
-    var currentPitchState: PitchState = .unknown
-    
-    // YENİ: Panoramik Dönüş Hızı (Açısal Hız - Gyroscope rad/s)
-    var currentAngularVelocity: Double = 0.0
-    
-    private let filterFactor: Double = 0.04
+
+    // Smoothed magnitude of the device's angular velocity (rad/s). This is the ONLY
+    // signal we take from the gyroscope, used purely as a hand-shake indicator for the
+    // post-capture quality score. It never judges how "level" a selfie is — that
+    // judgment comes entirely from the face itself (see SelfieCoach), because a phone
+    // can be held upright, tilted, low, high, or even while lying down and still take
+    // a perfectly good selfie. Device gravity has nothing to do with a good photo.
+    var smoothedAngularVelocity: Double = 0.0
+    var isStable: Bool { smoothedAngularVelocity < stabilityThreshold }
+
+    private let motionFilterFactor: Double = 0.2
+    private let stabilityThreshold: Double = 0.5
     private var isFirstUpdate = true
-    
-    private let hapticGenerator = UIImpactFeedbackGenerator(style: .medium)
-    private var wasFullyAlignedBefore = false
-    
-    init() { UIDevice.current.beginGeneratingDeviceOrientationNotifications() }
-    deinit { UIDevice.current.endGeneratingDeviceOrientationNotifications() }
-    
+
     func startUpdates() {
-        guard motionManager.isDeviceMotionAvailable else { return }
-        hapticGenerator.prepare()
-        motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
+        guard motionManager.isGyroAvailable else { return }
+        motionManager.gyroUpdateInterval = 1.0 / 60.0
         let queue = OperationQueue()
-        
-        motionManager.startDeviceMotionUpdates(to: queue) { [weak self] motion, error in
-            guard let motion = motion, error == nil, let self = self else { return }
-            
-            let rawRoll = motion.attitude.roll * (180.0 / .pi)
-            let rawPitch = motion.attitude.pitch * (180.0 / .pi)
-            
-            // Açısal dönüş hızını hesapla (Panorama Hız Koçu için)
-            let rotRate = motion.rotationRate
-            let speed = sqrt(rotRate.x * rotRate.x + rotRate.y * rotRate.y + rotRate.z * rotRate.z)
-            
-            var currentRoll: Double = 0.0
-            var currentPitch: Double = 0.0
-            
-            switch UIDevice.current.orientation {
-            case .landscapeLeft: currentRoll = rawPitch; currentPitch = -rawRoll
-            case .landscapeRight: currentRoll = -rawPitch; currentPitch = rawRoll
-            case .portraitUpsideDown: currentRoll = -rawRoll; currentPitch = -rawPitch
-            default: currentRoll = rawRoll; currentPitch = rawPitch
-            }
-            
-            let targetPitch = round(currentPitch / 90.0) * 90.0
-            let pitchDeviation = currentPitch - targetPitch
-            
+
+        motionManager.startGyroUpdates(to: queue) { [weak self] data, error in
+            guard let data = data, error == nil, let self = self else { return }
+
+            let rotation = data.rotationRate
+            let angularMagnitude = sqrt(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z)
+
             DispatchQueue.main.async {
-                self.currentAngularVelocity = speed
-                
                 if self.isFirstUpdate {
-                    self.smoothedRoll = currentRoll
-                    self.smoothedPitchDeviation = pitchDeviation
+                    self.smoothedAngularVelocity = angularMagnitude
                     self.isFirstUpdate = false
                 } else {
-                    self.smoothedRoll = (currentRoll * self.filterFactor) + (self.smoothedRoll * (1.0 - self.filterFactor))
-                    self.smoothedPitchDeviation = (pitchDeviation * self.filterFactor) + (self.smoothedPitchDeviation * (1.0 - self.filterFactor))
-                }
-                
-                let result = self.guidanceEngine.evaluate(roll: self.smoothedRoll, pitchDeviation: self.smoothedPitchDeviation)
-                self.currentRollState = result.roll
-                self.currentPitchState = result.pitch
-                
-                let isFullyAligned = (result.roll == .aligned && result.pitch == .aligned)
-                
-                if isFullyAligned && !self.wasFullyAlignedBefore {
-                    self.hapticGenerator.impactOccurred()
-                    self.wasFullyAlignedBefore = true
-                } else if !isFullyAligned {
-                    self.wasFullyAlignedBefore = false
+                    self.smoothedAngularVelocity = (angularMagnitude * self.motionFilterFactor) + (self.smoothedAngularVelocity * (1.0 - self.motionFilterFactor))
                 }
             }
         }
     }
-    
+
     func stopUpdates() {
-        motionManager.stopDeviceMotionUpdates()
+        motionManager.stopGyroUpdates()
         isFirstUpdate = true
-        wasFullyAlignedBefore = false
+        smoothedAngularVelocity = 0.0
     }
 }

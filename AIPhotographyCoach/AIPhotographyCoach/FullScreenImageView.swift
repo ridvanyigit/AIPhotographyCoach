@@ -3,18 +3,22 @@ import UIKit
 
 struct FullScreenImageView: View {
     let image: UIImage
+    var quality: CaptureQuality? = nil
     var onDelete: (() -> Void)? = nil
     @Environment(\.dismiss) var dismiss
-    
+
     @State private var showControls: Bool = true
     @State private var showShareSheet: Bool = false
     @State private var showDeleteConfirmation: Bool = false
+    @State private var showQualityBreakdown: Bool = false
+    @State private var showComingSoonAlert: Bool = false
+    @State private var showInfoAlert: Bool = false
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // 1. GARANTİLİ VE SAĞLAM ZOOM GÖRÜNTÜLEYİCİ
+            // 1. Robust pinch-to-zoom image viewer
             ZoomableScrollView(
                 image: image,
                 onSingleTap: {
@@ -25,10 +29,10 @@ struct FullScreenImageView: View {
             )
             .ignoresSafeArea()
 
-            // 2. ÜST VE ALT KONTROL PANELLERİ
+            // 2. Top & bottom control panels
             if showControls {
                 VStack {
-                    // ÜST BAR: Geri Dönüş ve AI Rozeti
+                    // TOP BAR: Back button and AI quality badge
                     HStack {
                         Button(action: { dismiss() }) {
                             HStack(spacing: 6) {
@@ -44,30 +48,26 @@ struct FullScreenImageView: View {
                             .clipShape(Capsule())
                             .shadow(color: .black.opacity(0.3), radius: 5)
                         }
-                        
+
                         Spacer()
-                        
-                        HStack(spacing: 5) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.yellow)
-                            Text("AI Ready")
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
+
+                        qualityBadge
                     }
                     .padding(.top, 50)
                     .padding(.horizontal, 16)
-                    
+
+                    if showQualityBreakdown, let quality = quality {
+                        qualityBreakdownPanel(quality)
+                            .padding(.top, 10)
+                            .padding(.horizontal, 16)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
                     Spacer()
-                    
-                    // ALT BAR: Eylemler ve Silme Butonu
+
+                    // BOTTOM BAR: Actions
                     HStack(spacing: 28) {
-                        // 1. Paylaşım
+                        // 1. Share
                         Button(action: { showShareSheet = true }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "square.and.arrow.up")
@@ -77,10 +77,11 @@ struct FullScreenImageView: View {
                             }
                             .foregroundColor(.white)
                         }
-                        
-                        // 2. AI Sihirli İyileştirme
+
+                        // 2. AI Edit (coming soon)
                         Button(action: {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            showComingSoonAlert = true
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "wand.and.stars")
@@ -91,10 +92,11 @@ struct FullScreenImageView: View {
                                     .foregroundColor(.yellow)
                             }
                         }
-                        
-                        // 3. AI Filtreler
+
+                        // 3. Filters (coming soon)
                         Button(action: {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            showComingSoonAlert = true
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "slider.horizontal.3")
@@ -104,10 +106,11 @@ struct FullScreenImageView: View {
                             }
                             .foregroundColor(.white)
                         }
-                        
-                        // 4. Detay
+
+                        // 4. Info
                         Button(action: {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            showInfoAlert = true
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "info.circle")
@@ -117,8 +120,8 @@ struct FullScreenImageView: View {
                             }
                             .foregroundColor(.white)
                         }
-                        
-                        // 5. YENİ: SİLME BUTONU (TRASH)
+
+                        // 5. Delete
                         Button(action: {
                             showDeleteConfirmation = true
                         }) {
@@ -144,7 +147,7 @@ struct FullScreenImageView: View {
                 .transition(.opacity)
             }
         }
-        // Silme Onay Penceresi (Apple Standart ActionSheet / ConfirmationDialog)
+        // Delete confirmation (standard Apple confirmation dialog / action sheet)
         .confirmationDialog("Delete Photo", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete Photo", role: .destructive) {
                 onDelete?()
@@ -157,10 +160,83 @@ struct FullScreenImageView: View {
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(activityItems: [image])
         }
+        .alert("Coming Soon", isPresented: $showComingSoonAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("This feature is coming in a future update.")
+        }
+        .alert("Photo Info", isPresented: $showInfoAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("\(Int(image.size.width)) × \(Int(image.size.height)) px")
+        }
+    }
+
+    // Shows the overall AI score if we captured one, falling back to the generic
+    // "AI Ready" badge for photos that don't carry quality metrics (e.g. re-opened
+    // from the system library in the future).
+    @ViewBuilder private var qualityBadge: some View {
+        Button(action: {
+            guard quality != nil else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showQualityBreakdown.toggle()
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }) {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.yellow)
+                if let quality = quality {
+                    Text("AI Score \(quality.overallScore)")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                } else {
+                    Text("AI Ready")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+        }
+    }
+
+    private func qualityBreakdownPanel(_ quality: CaptureQuality) -> some View {
+        HStack(spacing: 0) {
+            qualityStat(label: "Framing", value: quality.framingScore, icon: "square.dashed")
+            Divider().frame(height: 28).background(Color.white.opacity(0.2))
+            qualityStat(label: "Lighting", value: quality.lightingScore, icon: "sun.max")
+            Divider().frame(height: 28).background(Color.white.opacity(0.2))
+            qualityStat(label: "Sharpness", value: quality.sharpnessScore, icon: "camera.metering.center.weighted")
+            Divider().frame(height: 28).background(Color.white.opacity(0.2))
+            qualityStat(label: "Eyes", value: quality.eyesScore, icon: "eye")
+        }
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.15), lineWidth: 1))
+    }
+
+    private func qualityStat(label: String, value: Int, icon: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.7))
+            Text("\(value)")
+                .font(.system(size: 14, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+            Text(label)
+                .font(.system(size: 8, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
-// MARK: - Özel UIScrollView Alt Sınıfı (Layout ve Çizim Garantili)
+// MARK: - Custom UIScrollView subclass (guaranteed correct layout & zoom)
 struct ZoomableScrollView: UIViewRepresentable {
     let image: UIImage
     var onSingleTap: () -> Void
@@ -215,7 +291,7 @@ class CenteringScrollView: UIScrollView, UIScrollViewDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // Ekran çizildiği anda görselin tam boyutunu hesaplayıp ekrana yerleştirir
+        // Lay the image out to fill bounds the instant the view is drawn
         if zoomScale == 1.0 {
             imageView.frame = bounds
         } else {

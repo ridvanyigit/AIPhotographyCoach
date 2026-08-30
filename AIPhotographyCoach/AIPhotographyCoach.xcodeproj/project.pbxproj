@@ -15,7 +15,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				Untitled.swift,
 			);
 			target = 81D81070303C631400CE2776 /* AIPhotographyCoach */;
 		};

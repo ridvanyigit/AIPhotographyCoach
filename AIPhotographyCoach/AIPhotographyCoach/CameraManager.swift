@@ -2,255 +2,181 @@ import Foundation
 import AVFoundation
 import SwiftUI
 import CoreMedia
-import CoreImage
 import ImageIO
 import UIKit
 
 @Observable
 class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
+
     var isAuthorized: Bool = false
     let session = AVCaptureSession()
+
     var onFrameAvailable: ((CVPixelBuffer) -> Void)?
     var onPhotoCaptured: ((UIImage) -> Void)?
-    
+
+    // Raw EXIF brightness value (BV) from the live video stream, smoothed to avoid flicker
     var currentBrightness: Double = 0.0
-    var currentPosition: AVCaptureDevice.Position = .back
-    
-    var selectedFilter: String = "Original"
-    
-    // PORTRE MODU KONTROLLERİ
-    var portraitLighting: PortraitLightingMode = .natural
-    var isPortraitActive: Bool = false
-    
-    // SPATIAL 3D MODU KONTROLLERİ
-    var spatial3DMode: Spatial3DMode = .immersive
-    var isSpatial3DActive: Bool = false
-    var parallaxIntensity: String = "Mid"
-    
-    // BEAUTY AI KONTROLLERİ
-    var beautyAIMode: BeautyAIMode = .naturalGlow
-    var isBeautyAIActive: Bool = false
-    var beautyIntensity: Double = 0.5 // Varsayılan %50
-    var skinTonePalette: String = "Peach"
-    
-    private var isMultiCam: Bool = false
-    private var baseZoomFactor: CGFloat = 1.0
-    
-    private let sessionQueue = DispatchQueue(label: "com.ridvanyigit.CameraSessionQueue")
+    // Simple three-way classification derived from currentBrightness, consumed directly
+    // by SelfieCoach so exposure becomes part of the live coaching loop.
+    var lightingCondition: LightingCondition = .good
+
+    // Defaults to the front camera since this app is selfie-first
+    var currentPosition: AVCaptureDevice.Position = .front
+
+    private let sessionQueue = DispatchQueue(label: "com.aiphotocoach.CameraSessionQueue", qos: .userInteractive)
     private let videoOutput = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
-    private let ciContext = CIContext()
-    
+
+    // Brightness smoothing + classification thresholds (heuristic EXIF BV ranges).
+    // Lighting is advisory only now (shown as a tip, never blocks capture), so these
+    // lean toward not crying wolf rather than being scientifically precise.
+    private let brightnessFilterFactor: Double = 0.25
+    private let darkThreshold: Double = -2.5
+    private let brightThreshold: Double = 10.0
+
     func checkPermission() {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
-        case .authorized: isAuthorized = true; setupCamera()
-        case .notDetermined: requestPermission()
-        default: isAuthorized = false
-        }
-    }
-    
-    private func requestPermission() {
-        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-            DispatchQueue.main.async {
-                self?.isAuthorized = granted
-                if granted { self?.setupCamera() }
+        case .authorized:
+            isAuthorized = true
+            setupCamera()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    self?.isAuthorized = granted
+                    if granted { self?.setupCamera() }
+                }
             }
+        default:
+            isAuthorized = false
         }
     }
-    
-    private func getBestCamera(for position: AVCaptureDevice.Position) -> (device: AVCaptureDevice?, isMulti: Bool) {
-        if position == .front {
-            return (AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front), false)
-        }
-        
-        let discoverySession = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInTripleCamera, .builtInDualWideCamera, .builtInWideAngleCamera],
-            mediaType: .video,
-            position: position
-        )
-        
-        if let triple = discoverySession.devices.first(where: { $0.deviceType == .builtInTripleCamera }) {
-            return (triple, true)
-        }
-        if let dualWide = discoverySession.devices.first(where: { $0.deviceType == .builtInDualWideCamera }) {
-            return (dualWide, true)
-        }
-        if let wide = discoverySession.devices.first(where: { $0.deviceType == .builtInWideAngleCamera }) {
-            return (wide, false)
-        }
-        return (AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position), false)
-    }
-    
+
     private func setupCamera() {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
             self.session.beginConfiguration()
-            self.session.sessionPreset = .hd1920x1080
-            
-            let (videoDevice, isMulti) = self.getBestCamera(for: self.currentPosition)
-            self.isMultiCam = isMulti
-            
-            guard let device = videoDevice,
-                  let videoDeviceInput = try? AVCaptureDeviceInput(device: device) else { return }
-            
-            if self.session.canAddInput(videoDeviceInput) { self.session.addInput(videoDeviceInput) }
-            
+
+            // We want the highest usable resolution for a selfie
+            self.session.sessionPreset = .photo
+
+            guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self.currentPosition),
+                  let videoDeviceInput = try? AVCaptureDeviceInput(device: videoDevice) else {
+                self.session.commitConfiguration()
+                return
+            }
+
+            if self.session.canAddInput(videoDeviceInput) {
+                self.session.addInput(videoDeviceInput)
+            }
+
             if self.session.canAddOutput(self.videoOutput) {
                 self.session.addOutput(self.videoOutput)
-                let videoQueue = DispatchQueue(label: "com.ridvanyigit.VideoQueue")
+                // Analyze video frames on a background queue to keep the UI smooth
+                let videoQueue = DispatchQueue(label: "com.aiphotocoach.VideoQueue", qos: .userInitiated)
                 self.videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
+                self.videoOutput.alwaysDiscardsLateVideoFrames = true // Drop stale frames to save battery
             }
-            
+
             if self.session.canAddOutput(self.photoOutput) {
                 self.session.addOutput(self.photoOutput)
                 self.photoOutput.maxPhotoQualityPrioritization = .quality
             }
-            
+
+            // Tune autofocus/exposure specifically for close-range front-camera use
             do {
-                try device.lockForConfiguration()
-                if self.currentPosition == .front {
-                    device.videoZoomFactor = 1.0
-                } else if isMulti, let firstSwitch = device.virtualDeviceSwitchOverVideoZoomFactors.first {
-                    self.baseZoomFactor = CGFloat(truncating: firstSwitch)
-                    device.videoZoomFactor = self.baseZoomFactor
-                } else {
-                    self.baseZoomFactor = 1.0
-                    device.videoZoomFactor = 1.0
+                try videoDevice.lockForConfiguration()
+                if videoDevice.isFocusModeSupported(.continuousAutoFocus) {
+                    videoDevice.focusMode = .continuousAutoFocus
                 }
-                device.unlockForConfiguration()
+                if videoDevice.isExposureModeSupported(.continuousAutoExposure) {
+                    videoDevice.exposureMode = .continuousAutoExposure
+                }
+                videoDevice.unlockForConfiguration()
             } catch {
-                print("Initial zoom error: \(error)")
+                print("Camera config error: \(error)")
             }
-            
+
             self.session.commitConfiguration()
             self.session.startRunning()
         }
     }
-    
+
     func stopSession() {
         sessionQueue.async { [weak self] in
             guard let self = self, self.session.isRunning else { return }
             self.session.stopRunning()
         }
     }
-    
+
     func startSession() {
         sessionQueue.async { [weak self] in
             guard let self = self, !self.session.isRunning else { return }
             self.session.startRunning()
         }
     }
-    
-    func switchCamera() {
-        sessionQueue.async { [weak self] in
-            guard let self = self else { return }
-            self.session.beginConfiguration()
-            
-            guard let currentInput = self.session.inputs.first as? AVCaptureDeviceInput else { return }
-            self.session.removeInput(currentInput)
-            
-            self.currentPosition = self.currentPosition == .back ? .front : .back
-            
-            let (videoDevice, isMulti) = self.getBestCamera(for: self.currentPosition)
-            self.isMultiCam = isMulti
-            
-            guard let newDevice = videoDevice,
-                  let newInput = try? AVCaptureDeviceInput(device: newDevice) else {
-                self.session.commitConfiguration()
-                return
-            }
-            
-            if self.session.canAddInput(newInput) { self.session.addInput(newInput) } 
-            else { self.session.addInput(currentInput) }
-            
-            do {
-                try newDevice.lockForConfiguration()
-                if self.currentPosition == .front {
-                    newDevice.videoZoomFactor = 1.0
-                } else if isMulti, let firstSwitch = newDevice.virtualDeviceSwitchOverVideoZoomFactors.first {
-                    self.baseZoomFactor = CGFloat(truncating: firstSwitch)
-                    newDevice.videoZoomFactor = self.baseZoomFactor
-                } else {
-                    self.baseZoomFactor = 1.0
-                    newDevice.videoZoomFactor = 1.0
-                }
-                newDevice.unlockForConfiguration()
-            } catch {
-                print("Camera switch zoom error: \(error)")
-            }
-            
-            self.session.commitConfiguration()
-        }
-    }
-    
-    func setZoom(_ level: Double) {
-        sessionQueue.async { [weak self] in
-            guard let self = self,
-                  let input = self.session.inputs.first as? AVCaptureDeviceInput else { return }
-            let device = input.device
-            
-            if self.currentPosition == .front { return }
-            
-            do {
-                try device.lockForConfiguration()
-                let targetFactor: CGFloat
-                if self.isMultiCam {
-                    if level == 0.5 {
-                        targetFactor = device.minAvailableVideoZoomFactor
-                    } else {
-                        targetFactor = self.baseZoomFactor * CGFloat(level)
-                    }
-                } else {
-                    targetFactor = CGFloat(level)
-                }
-                
-                let clampedZoom = max(device.minAvailableVideoZoomFactor, min(targetFactor, device.maxAvailableVideoZoomFactor))
-                device.videoZoomFactor = clampedZoom
-                device.unlockForConfiguration()
-            } catch {
-                print("Zoom configuration error: \(error)")
-            }
-        }
-    }
-    
-    func focusAndExpose(at point: CGPoint, screenWidth: CGFloat, screenHeight: CGFloat) {
-        sessionQueue.async { [weak self] in
-            guard let self = self else { return }
-            guard let device = self.getBestCamera(for: self.currentPosition).device else { return }
-            
-            let focusX = point.y / screenHeight
-            let focusY = 1.0 - (point.x / screenWidth)
-            let sensorPoint = CGPoint(x: focusX, y: focusY)
-            
-            do {
-                try device.lockForConfiguration()
-                if device.isFocusPointOfInterestSupported && device.isFocusModeSupported(.autoFocus) {
-                    device.focusPointOfInterest = sensorPoint
-                    device.focusMode = .autoFocus
-                }
-                if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(.autoExpose) {
-                    device.exposurePointOfInterest = sensorPoint
-                    device.exposureMode = .autoExpose
-                }
-                device.unlockForConfiguration()
-            } catch {
-                print("Focus error: \(error)")
-            }
-        }
-    }
-    
+
     func capturePhoto() {
         let settings = AVCapturePhotoSettings()
+        settings.photoQualityPrioritization = .quality // Best available quality
+
         if let photoConnection = photoOutput.connection(with: .video) {
             photoConnection.videoOrientation = currentVideoOrientation()
+            // Mirror the output for the front camera to match what the user saw in preview
+            // (standard Apple Camera app behavior)
             if currentPosition == .front && photoConnection.isVideoMirroringSupported {
                 photoConnection.isVideoMirrored = true
             }
         }
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
-    
+
+    // MARK: - Camera Switching
+    func switchCamera() {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.session.beginConfiguration()
+
+            // Remove the current input
+            guard let currentInput = self.session.inputs.first as? AVCaptureDeviceInput else { return }
+            self.session.removeInput(currentInput)
+
+            // Flip position
+            self.currentPosition = self.currentPosition == .back ? .front : .back
+
+            // Bring in the new device
+            guard let newDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self.currentPosition),
+                  let newInput = try? AVCaptureDeviceInput(device: newDevice) else {
+                // Restore the previous camera if the switch failed
+                self.session.addInput(currentInput)
+                self.session.commitConfiguration()
+                return
+            }
+
+            if self.session.canAddInput(newInput) {
+                self.session.addInput(newInput)
+            } else {
+                self.session.addInput(currentInput)
+            }
+
+            // Re-apply focus/exposure settings to the newly active camera
+            do {
+                try newDevice.lockForConfiguration()
+                if newDevice.isFocusModeSupported(.continuousAutoFocus) {
+                    newDevice.focusMode = .continuousAutoFocus
+                }
+                if newDevice.isExposureModeSupported(.continuousAutoExposure) {
+                    newDevice.exposureMode = .continuousAutoExposure
+                }
+                newDevice.unlockForConfiguration()
+            } catch {
+                print("Camera switch config error: \(error)")
+            }
+
+            self.session.commitConfiguration()
+        }
+    }
+
     private func currentVideoOrientation() -> AVCaptureVideoOrientation {
         switch UIDevice.current.orientation {
         case .portrait: return .portrait
@@ -260,201 +186,43 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
         default: return .portrait
         }
     }
-    
+
+    // MARK: - AVCapturePhotoCaptureDelegate
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard let data = photo.fileDataRepresentation(), var image = UIImage(data: data) else { return }
-        
-        // 1. BEAUTY AI RÖTUŞ UYGULA
-        if isBeautyAIActive, let beautyImage = applyBeautyAIEffect(to: image, mode: beautyAIMode) {
-            image = beautyImage
-        }
-        // 2. SPATIAL 3D EFECTLERİ UYGULA
-        else if isSpatial3DActive, let spatialImage = applySpatial3DEffect(to: image, mode: spatial3DMode) {
-            image = spatialImage
-        }
-        // 3. PORTRE IŞIĞI UYGULA
-        else if isPortraitActive, let portraitImage = applyPortraitLighting(to: image, mode: portraitLighting) {
-            image = portraitImage
-        }
-        // 4. FİLTRE UYGULA
-        else if selectedFilter != "Original", let filteredImage = applyFilter(to: image, filterName: selectedFilter) {
-            image = filteredImage
-        }
-        
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+        guard let data = photo.fileDataRepresentation(), let image = UIImage(data: data) else { return }
+
+        // Hand the raw image back to the UI layer. Saving to the photo library happens
+        // after ContentView applies the selected filter/aspect crop, so we never save
+        // an unprocessed frame the user didn't actually choose.
         DispatchQueue.main.async { self.onPhotoCaptured?(image) }
     }
-    
-    // Beauty AI CoreImage Rötuş Motoru (Dinamik Slider Değeriyle Ölçeklenir)
-    private func applyBeautyAIEffect(to image: UIImage, mode: BeautyAIMode) -> UIImage? {
-        guard let ciImage = CIImage(image: image) else { return image }
-        var output = ciImage
-        
-        switch mode {
-        case .naturalGlow:
-            if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(output, forKey: kCIInputImageKey)
-                filter.setValue(1.06, forKey: kCIInputBrightnessKey)
-                filter.setValue(1.10, forKey: kCIInputSaturationKey)
-                output = filter.outputImage ?? output
-            }
-        case .smoothSkin, .proRetouch:
-            if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(output, forKey: kCIInputImageKey)
-                // Dinamik slider oranına (beautyIntensity: 0.0 - 1.0) göre parlaklık ve pürüzsüzlük
-                let brightnessBoost = 1.0 + (0.08 * beautyIntensity)
-                let saturationBoost = 1.0 + (0.14 * beautyIntensity)
-                filter.setValue(brightnessBoost, forKey: kCIInputBrightnessKey)
-                filter.setValue(1.04, forKey: kCIInputContrastKey)
-                filter.setValue(saturationBoost, forKey: kCIInputSaturationKey)
-                output = filter.outputImage ?? output
-            }
-        case .eyeBrighten:
-            if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(output, forKey: kCIInputImageKey)
-                filter.setValue(1.14, forKey: kCIInputContrastKey)
-                output = filter.outputImage ?? output
-            }
-        case .facialTone:
-            if let filter = CIFilter(name: "CITemperatureAndTint") {
-                filter.setValue(output, forKey: kCIInputImageKey)
-                let targetTemp: CGFloat = (skinTonePalette == "Bronze" ? 7800 : (skinTonePalette == "Porcelain" ? 5800 : 7200))
-                filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-                filter.setValue(CIVector(x: targetTemp, y: 0), forKey: "inputTargetNeutral")
-                output = filter.outputImage ?? output
-            }
-        }
-        
-        if let cgImage = ciContext.createCGImage(output, from: output.extent) {
-            return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
-        }
-        return image
-    }
-    
-    private func applySpatial3DEffect(to image: UIImage, mode: Spatial3DMode) -> UIImage? {
-        guard let ciImage = CIImage(image: image) else { return image }
-        var output = ciImage
-        
-        switch mode {
-        case .anaglyph:
-            let shiftFactor: Double = (parallaxIntensity == "High" ? 1.35 : (parallaxIntensity == "Low" ? 0.75 : 1.05))
-            if let redFilter = CIFilter(name: "CIColorMatrix") {
-                redFilter.setValue(output, forKey: kCIInputImageKey)
-                redFilter.setValue(CIVector(x: shiftFactor, y: 0.1, z: 0.1, w: 0), forKey: "inputRVector")
-                redFilter.setValue(CIVector(x: 0, y: 0.9, z: shiftFactor, w: 0), forKey: "inputGVector")
-                redFilter.setValue(CIVector(x: 0, y: 0.9, z: shiftFactor, w: 0), forKey: "inputBVector")
-                output = redFilter.outputImage ?? output
-            }
-        case .holoMesh:
-            if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(output, forKey: kCIInputImageKey)
-                filter.setValue(1.3, forKey: kCIInputContrastKey)
-                filter.setValue(1.15, forKey: kCIInputSaturationKey)
-                output = filter.outputImage ?? output
-            }
-        case .visionPro, .immersive, .focusedDepth:
-            if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(output, forKey: kCIInputImageKey)
-                filter.setValue(1.05, forKey: kCIInputContrastKey)
-                output = filter.outputImage ?? output
-            }
-        }
-        
-        if let cgImage = ciContext.createCGImage(output, from: output.extent) {
-            return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
-        }
-        return image
-    }
-    
-    private func applyPortraitLighting(to image: UIImage, mode: PortraitLightingMode) -> UIImage? {
-        guard let ciImage = CIImage(image: image) else { return image }
-        var output = ciImage
-        
-        switch mode {
-        case .natural: break
-        case .studio:
-            if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(output, forKey: kCIInputImageKey)
-                filter.setValue(1.12, forKey: kCIInputBrightnessKey)
-                filter.setValue(1.05, forKey: kCIInputContrastKey)
-                output = filter.outputImage ?? output
-            }
-        case .contour:
-            if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(output, forKey: kCIInputImageKey)
-                filter.setValue(1.22, forKey: kCIInputContrastKey)
-                output = filter.outputImage ?? output
-            }
-        case .stage:
-            if let vignette = CIFilter(name: "CIVignetteEffect") {
-                vignette.setValue(output, forKey: kCIInputImageKey)
-                vignette.setValue(CIVector(x: ciImage.extent.midX, y: ciImage.extent.midY), forKey: kCIInputCenterKey)
-                vignette.setValue(ciImage.extent.width * 0.45, forKey: kCIInputRadiusKey)
-                vignette.setValue(1.0, forKey: kCIInputIntensityKey)
-                output = vignette.outputImage ?? output
-            }
-        case .stageMono:
-            if let mono = CIFilter(name: "CIPhotoEffectMono") {
-                mono.setValue(output, forKey: kCIInputImageKey)
-                output = mono.outputImage ?? output
-            }
-        case .highKeyMono:
-            if let noir = CIFilter(name: "CIPhotoEffectNoir") {
-                noir.setValue(output, forKey: kCIInputImageKey)
-                output = noir.outputImage ?? output
-            }
-        }
-        
-        if let cgImage = ciContext.createCGImage(output, from: output.extent) {
-            return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
-        }
-        return image
-    }
-    
-    private func applyFilter(to image: UIImage, filterName: String) -> UIImage? {
-        guard let ciImage = CIImage(image: image) else { return image }
-        var outputCIImage: CIImage = ciImage
-        
-        switch filterName {
-        case "Vivid":
-            if let filter = CIFilter(name: "CIColorControls") {
-                filter.setValue(ciImage, forKey: kCIInputImageKey)
-                filter.setValue(1.35, forKey: kCIInputSaturationKey)
-                filter.setValue(1.08, forKey: kCIInputContrastKey)
-                outputCIImage = filter.outputImage ?? ciImage
-            }
-        case "Warm":
-            if let filter = CIFilter(name: "CITemperatureAndTint") {
-                filter.setValue(ciImage, forKey: kCIInputImageKey)
-                filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-                filter.setValue(CIVector(x: 7600, y: 0), forKey: "inputTargetNeutral")
-                outputCIImage = filter.outputImage ?? ciImage
-            }
-        case "Mono":
-            if let filter = CIFilter(name: "CIPhotoEffectMono") {
-                filter.setValue(ciImage, forKey: kCIInputImageKey)
-                outputCIImage = filter.outputImage ?? ciImage
-            }
-        case "Noir":
-            if let filter = CIFilter(name: "CIPhotoEffectNoir") {
-                filter.setValue(ciImage, forKey: kCIInputImageKey)
-                outputCIImage = filter.outputImage ?? ciImage
-            }
-        default: break
-        }
-        
-        if let cgImage = ciContext.createCGImage(outputCIImage, from: outputCIImage.extent) {
-            return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
-        }
-        return image
-    }
-    
+
+    // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) { onFrameAvailable?(pixelBuffer) }
+        if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            onFrameAvailable?(pixelBuffer)
+        }
+
+        // Read the live exposure metadata (EXIF) to drive the lighting coach
         if let metadata = CMCopyDictionaryOfAttachments(allocator: kCFAllocatorDefault, target: sampleBuffer, attachmentMode: kCMAttachmentMode_ShouldPropagate) as? [String: Any],
            let exifData = metadata[kCGImagePropertyExifDictionary as String] as? [String: Any],
            let brightness = exifData[kCGImagePropertyExifBrightnessValue as String] as? Double {
-            DispatchQueue.main.async { self.currentBrightness = brightness }
+            DispatchQueue.main.async {
+                self.updateLighting(with: brightness)
+            }
+        }
+    }
+
+    private func updateLighting(with rawBrightness: Double) {
+        // Low-pass filter so a single noisy frame doesn't flip the coaching state
+        currentBrightness = (rawBrightness * brightnessFilterFactor) + (currentBrightness * (1.0 - brightnessFilterFactor))
+
+        if currentBrightness < darkThreshold {
+            lightingCondition = .tooDark
+        } else if currentBrightness > brightThreshold {
+            lightingCondition = .tooBright
+        } else {
+            lightingCondition = .good
         }
     }
 }

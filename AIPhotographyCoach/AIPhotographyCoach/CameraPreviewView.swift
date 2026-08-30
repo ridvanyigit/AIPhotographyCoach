@@ -12,30 +12,29 @@ struct CameraPreviewView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: VideoPreviewView, context: Context) {
-        // SwiftUI tarafında bir güncelleme olursa burası çalışır, şu an boş kalabilir.
+        // Nothing to do here for now — SwiftUI-driven updates aren't needed yet.
     }
 }
 
-// Apple'ın standart kamera katmanını çizebilmek için gereken özel UIView sınıfı
+// Thin UIView subclass needed to host Apple's native camera preview layer
 class VideoPreviewView: UIView {
     override class var layerClass: AnyClass {
         return AVCaptureVideoPreviewLayer.self
     }
-    
+
     var videoPreviewLayer: AVCaptureVideoPreviewLayer {
         return layer as! AVCaptureVideoPreviewLayer
     }
-    
-    // EKRAN DÖNDÜĞÜNDE VEYA BOYUT DEĞİŞTİRDİĞİNDE OTOMATİK ÇALIŞIR
+
+    // Runs automatically whenever the screen rotates or the view resizes
     override func layoutSubviews() {
         super.layoutSubviews()
-        
-        // Kameranın yönlendirme (orientation) ayarlarını destekleyip desteklemediğini kontrol et
+
+        // Bail out if the preview layer's connection doesn't support orientation changes
         guard let connection = videoPreviewLayer.connection, connection.isVideoOrientationSupported else { return }
-        
-        // Mevcut ekranın (UIWindowScene) yönelimini al
+
+        // Match the camera connection's orientation to the current window scene orientation
         if let windowScene = window?.windowScene {
-            // Ekran ne yöne döndüyse, kamera bağlantısını (connection) da o yöne çevir
             switch windowScene.interfaceOrientation {
             case .portrait:
                 connection.videoOrientation = .portrait
