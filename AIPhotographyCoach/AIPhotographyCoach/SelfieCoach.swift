@@ -9,10 +9,12 @@ import CoreGraphics
 struct SelfieCoach {
 
     // Shared "distance from perfect" tuning, also read by SelfieGuidanceView so the
-    // three guide rings drawn on screen always match the thresholds used here.
+    // guide phone drawn on screen always matches the thresholds used here. Tuned to
+    // sit in the middle: forgiving enough that normal handheld use can reach it, but
+    // tight enough that a genuinely bad pose never reads as "Perfect".
     static let maxTravelDegrees: Double = 30.0
-    static let perfectRatio: Double = 0.15   // innermost ring — auto-capture fires here
-    static let veryGoodRatio: Double = 0.45  // middle ring
+    static let perfectRatio: Double = 0.22   // auto-capture fires here
+    static let veryGoodRatio: Double = 0.5
 
     func evaluate(face: FaceLandmarkData?) -> SelfiePose {
         guard let face = face else {
@@ -27,7 +29,7 @@ struct SelfieCoach {
         let isSizeGood = faceArea >= 0.05 && faceArea <= 0.55
         let isRoughlyOnScreen = faceBox.midX >= 0.15 && faceBox.midX <= 0.85
             && faceBox.midY >= 0.15 && faceBox.midY <= 0.85
-        let isYawOK = abs(face.faceYaw) <= 0.75
+        let isYawOK = abs(face.faceYaw) <= 0.45
 
         if !isSizeGood || !isRoughlyOnScreen || !isYawOK {
             return SelfiePose(state: .fitIntoMask, rollDegrees: face.faceRollDegrees, verticalDegrees: 0, hasFace: true)
@@ -75,22 +77,22 @@ struct SelfieCoach {
         guard let analysis = analysis else { return .unknown }
 
         let idealBrightness = 0.55
-        let brightnessTolerance = 0.22
+        let brightnessTolerance = 0.28
         let brightnessDeviation = abs(analysis.brightness - idealBrightness) / brightnessTolerance
 
         let evennessDeviation = sqrt(pow(analysis.horizontalBias, 2) + pow(analysis.verticalBias, 2))
 
-        let contrastComfortable = 0.32
+        let contrastComfortable = 0.4
         let contrastDeviation = max(0, analysis.contrast - contrastComfortable) / (1 - contrastComfortable)
 
         let combined = (brightnessDeviation * 0.4) + (evennessDeviation * 0.4) + (contrastDeviation * 0.2)
 
         let state: LightingGuidanceState
-        if combined <= 0.18 {
+        if combined <= 0.3 {
             state = .perfect
-        } else if combined <= 0.5 {
+        } else if combined <= 0.6 {
             state = .veryGood
-        } else if combined <= 1.0 {
+        } else if combined <= 1.1 {
             state = .good
         } else {
             state = .needsWork

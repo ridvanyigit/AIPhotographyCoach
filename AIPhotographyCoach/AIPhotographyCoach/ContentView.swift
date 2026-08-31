@@ -134,15 +134,15 @@ struct ContentView: View {
                     .animation(.easeInOut(duration: 0.25), value: selfieLightingMode)
             }
 
-            // 4. Minimal orientation compass — driven entirely by the FACE, never by
-            // the phone's physical tilt. Three rings grade the pose Good / Very Good /
-            // Perfect; only Perfect (dead-center) is eligible for auto-capture.
+            // 4. Realistic phone-shaped orientation guide — driven entirely by the
+            // FACE, never by the phone's physical tilt. The guide phone itself
+            // tilts/shifts to mirror the current deviation; it settles upright and
+            // glows once Perfect (dead-center) is eligible for auto-capture.
             SelfieGuidanceView(
                 state: currentPose.state,
                 hasFace: currentPose.hasFace,
                 rollDegrees: currentPose.rollDegrees,
                 verticalDegrees: currentPose.verticalDegrees,
-                lightGuidance: currentLighting,
                 showGrid: showGrid
             )
             .ignoresSafeArea()
@@ -647,11 +647,10 @@ struct ContentView: View {
         }
     }
 
-    // Auto-capture engine: fills a progress ring the moment BOTH the pose AND the
-    // light source are perfect, then fires immediately — the user never has to
-    // freeze in place waiting for a timer. The gain/decay values are intentionally
-    // lopsided toward firing fast: a couple of good frames in a row is enough, and a
-    // single stray frame doesn't reset much.
+    // Auto-capture engine: fills a progress ring once BOTH the pose AND the light
+    // source are perfect, then fires quickly — but requires a couple of consecutive
+    // good frames (not just one lucky noisy sample) before it commits, so a shaky
+    // near-miss can't slip through and get auto-captured as "Perfect".
     private func handleAutoLockCapture(isReady: Bool) {
         guard isAutoCaptureEnabled && !isCountingDown else {
             autoLockProgress = 0.0
@@ -660,10 +659,10 @@ struct ContentView: View {
 
         if isReady {
             let now = Date()
-            guard now.timeIntervalSince(lastCaptureTime) > 2.0 else { return }
+            guard now.timeIntervalSince(lastCaptureTime) > 1.8 else { return }
 
             if autoLockProgress < 1.0 {
-                autoLockProgress += 0.35
+                autoLockProgress += 0.4
                 if autoLockProgress >= 1.0 {
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                     lastCaptureTime = now
@@ -672,7 +671,7 @@ struct ContentView: View {
                 }
             }
         } else {
-            autoLockProgress = max(0.0, autoLockProgress - 0.15)
+            autoLockProgress = max(0.0, autoLockProgress - 0.12)
         }
     }
 

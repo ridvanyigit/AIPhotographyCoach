@@ -5,18 +5,18 @@ struct SelfieGuidanceView: View {
     let hasFace: Bool
     let rollDegrees: Double         // face's own tilt, not the device's
     let verticalDegrees: Double     // head angle + physical phone height, combined
-    let lightGuidance: LightingGuidance
     let showGrid: Bool
 
-    private var isPerfect: Bool { state == .perfect }
-
-    private var compassAccent: Color {
+    // Traffic-light scheme: green means "shoot now", yellow means "close, keep
+    // adjusting", red means "not yet" — and colorless/gray while we simply haven't
+    // found a face to grade yet.
+    private var accent: Color {
+        guard hasFace else { return .white.opacity(0.35) }
         switch state {
-        case .perfect: return .yellow
-        case .veryGood: return Color(red: 1.0, green: 0.85, blue: 0.4)
-        case .good: return .white
-        case .eyesClosed: return Color(red: 1.0, green: 0.45, blue: 0.4)
-        default: return hasFace ? .white.opacity(0.85) : .white.opacity(0.3)
+        case .perfect: return Color(red: 0.25, green: 0.9, blue: 0.4)
+        case .veryGood, .good: return Color.yellow
+        case .fitIntoMask, .eyesClosed: return Color(red: 1.0, green: 0.3, blue: 0.3)
+        case .searching: return .white.opacity(0.35)
         }
     }
 
@@ -37,63 +37,57 @@ struct SelfieGuidanceView: View {
                     .stroke(Color.white.opacity(0.12), lineWidth: 1)
                 }
 
-                // Small, elegant orientation compass, driven entirely by how the FACE
-                // looks in frame — never by the phone's physical tilt relative to
-                // gravity. Three concentric rings show Good / Very Good / Perfect;
-                // auto-capture only ever fires once the dot reaches the innermost one.
-                OrientationCompassView(
+                // A nearly-transparent little iPhone, tucked to the side so it never
+                // sits over the user's own face, that tilts/shifts to mirror exactly
+                // how the real phone needs to move. Its outline is the traffic-light
+                // color; everything behind it — the camera feed, the face — stays
+                // fully visible through it.
+                PhoneOrientationView(
                     hasFace: hasFace,
                     rollDegrees: rollDegrees,
                     verticalDegrees: verticalDegrees,
-                    accent: compassAccent,
+                    accent: accent,
                     state: state
                 )
-                .frame(width: 108, height: 108)
-                .position(x: w / 2, y: h * 0.42)
-
-                // Light-source satellite compass. Only revealed once the pose itself
-                // is dead-center — no point asking someone to fix their lighting while
-                // they're still framing their face. Auto-capture needs both perfect.
-                if state == .perfect {
-                    LightCompassView(guidance: lightGuidance)
-                        .position(x: w / 2, y: h * 0.42 + 78)
-                        .transition(.scale(scale: 0.7).combined(with: .opacity))
-                        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: state)
-                }
+                .frame(width: 140, height: 220)
+                .position(x: w - 75, y: h * 0.5)
             }
         }
         .allowsHitTesting(false)
     }
 }
 
-// MARK: - Orientation Compass
-// A compact spirit-level style indicator, but leveled against the subject's face
-// rather than the horizon: a dot drifts inside three concentric rings based on how
-// tilted/off-center the face appears. Crossing the outer ring means "good enough to
-// shoot manually", the middle ring means "very good", and only the tiny center zone
-// means "perfect" — which is the only time auto-capture fires. Directional cues
-// (rotate clockwise/counterclockwise, tilt up/down) only appear when a correction is
-// genuinely needed, and everything stays neutral/dim until a face is actually found.
-private struct OrientationCompassView: View {
+// MARK: - Phone Orientation Guide
+// A mostly-transparent vector iPhone outline — a thin colored frame, a faint
+// screen outline, a small notch — that acts as a live mirror of the current pose
+// deviation: it rolls left/right to match the face's own tilt, shifts up/down and
+// tilts in pseudo-3D to match the combined head-angle + framing signal. Because
+// it's a frame rather than a filled shape, whatever is behind it (the live camera
+// preview, the user's face) stays clearly visible. Straightening it out is a
+// completely literal instruction — "make the little phone stand up straight and
+// glow green" — rather than an abstract dot-in-a-ring metaphor. It settles
+// dead-center-relative, upright, and green only once every check passes, which is
+// the only moment auto-capture is eligible to fire. Directional arrows appear only
+// when a specific correction is still needed.
+private struct PhoneOrientationView: View {
     let hasFace: Bool
     let rollDegrees: Double
     let verticalDegrees: Double
     let accent: Color
     let state: SelfieState
 
-    private let ringDiameter: CGFloat = 108
-    private let dotDiameter: CGFloat = 12
-    private var veryGoodDiameter: CGFloat { ringDiameter * CGFloat(SelfieCoach.veryGoodRatio) }
-    private var perfectDiameter: CGFloat { max(ringDiameter * CGFloat(SelfieCoach.perfectRatio), 16) }
+    private let travel = SelfieCoach.maxTravelDegrees
+    private let verticalRange: CGFloat = 28
+    private let phoneWidth: CGFloat = 68
+    private let phoneHeight: CGFloat = 140
+    private let cornerRadius: CGFloat = 18
 
-    private var dotOffset: CGSize {
-        guard hasFace else { return .zero }
-        let radius = (ringDiameter - dotDiameter) / 2
-        let travel = SelfieCoach.maxTravelDegrees
-        let x = CGFloat(min(max(rollDegrees / travel, -1.0), 1.0)) * radius
-        let y = CGFloat(min(max(-verticalDegrees / travel, -1.0), 1.0)) * radius
-        return CGSize(width: x, height: y)
-    }
+    private var clampedRoll: Double { min(max(rollDegrees, -travel), travel) }
+    private var clampedVertical: Double { min(max(verticalDegrees, -travel), travel) }
+
+    private var phoneRotation: Double { hasFace ? clampedRoll : 0 }
+    private var phoneVerticalOffset: CGFloat { hasFace ? -CGFloat(clampedVertical / travel) * verticalRange : 0 }
+    private var phoneTilt3D: Double { hasFace ? -clampedVertical * 0.5 : 0 }
 
     private var needsClockwiseRotation: Bool { hasFace && rollDegrees < -12.0 }
     private var needsCounterClockwiseRotation: Bool { hasFace && rollDegrees > 12.0 }
@@ -102,148 +96,99 @@ private struct OrientationCompassView: View {
 
     var body: some View {
         ZStack {
-            // Outer ring — "Good" boundary
-            Circle()
-                .stroke(Color.white.opacity(hasFace ? 0.35 : 0.16), lineWidth: 1.2)
-
-            // Middle ring — "Very Good" boundary
-            Circle()
-                .stroke(accent.opacity(hasFace ? 0.4 : 0.12), lineWidth: 1.2)
-                .frame(width: veryGoodDiameter, height: veryGoodDiameter)
-
-            // Innermost ring — "Perfect" zone, the only place auto-capture fires
-            Circle()
-                .stroke(accent.opacity(state == .perfect ? 0.95 : (hasFace ? 0.5 : 0.14)), lineWidth: 1.4)
-                .frame(width: perfectDiameter, height: perfectDiameter)
-
-            // Minimal N/E/S/W reference ticks
-            ForEach([0, 90, 180, 270], id: \.self) { degree in
-                Rectangle()
-                    .fill(Color.white.opacity(hasFace ? 0.22 : 0.08))
-                    .frame(width: 1, height: 5)
-                    .offset(y: -(ringDiameter / 2) + 2)
-                    .rotationEffect(.degrees(Double(degree)))
+            // Soft glow once every check passes — the only moment this stops being
+            // a plain outline
+            if state == .perfect {
+                RoundedRectangle(cornerRadius: cornerRadius + 8, style: .continuous)
+                    .fill(accent.opacity(0.35))
+                    .frame(width: phoneWidth + 26, height: phoneHeight + 26)
+                    .blur(radius: 18)
             }
 
             // Rotation correction cue (face roll)
             if needsCounterClockwiseRotation {
                 Image(systemName: "arrow.counterclockwise")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundColor(accent)
-                    .offset(y: -(ringDiameter / 2) - 15)
+                    .offset(x: -(phoneWidth / 2 + 24), y: -10)
                     .transition(.opacity)
             } else if needsClockwiseRotation {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundColor(accent)
-                    .offset(y: -(ringDiameter / 2) - 15)
+                    .offset(x: phoneWidth / 2 + 24, y: -10)
                     .transition(.opacity)
             }
 
             // Tilt/move correction cue (combined head angle + phone height)
             if needsTiltUp {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 11, weight: .bold))
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundColor(accent)
-                    .offset(y: (ringDiameter / 2) + 13)
+                    .offset(y: -(phoneHeight / 2 + 22))
                     .transition(.opacity)
             } else if needsTiltDown {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .bold))
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundColor(accent)
-                    .offset(y: (ringDiameter / 2) + 13)
+                    .offset(y: (phoneHeight / 2 + 22))
                     .transition(.opacity)
             }
 
-            // Soft glow only in the true perfect state
-            if state == .perfect {
-                Circle()
-                    .stroke(accent.opacity(0.5), lineWidth: 8)
-                    .frame(width: perfectDiameter, height: perfectDiameter)
-                    .blur(radius: 6)
-            }
+            // The phone itself — almost entirely see-through, just a colored frame
+            ZStack {
+                // Barely-there body tint so this still reads as a solid object,
+                // without meaningfully hiding anything behind it
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(0.04))
 
-            // The moving level dot — only shown once a face is actually found, so an
-            // empty frame (sky, ceiling, wall) can never look "ready".
-            if hasFace {
-                Circle()
-                    .fill(accent)
-                    .frame(width: dotDiameter, height: dotDiameter)
-                    .shadow(color: accent.opacity(state == .perfect ? 0.8 : 0.0), radius: state == .perfect ? 6 : 0)
-                    .offset(dotOffset)
-            } else {
-                Image(systemName: "person.fill.questionmark")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.25))
+                // The frame itself carries all the color/status information
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(accent, lineWidth: state == .perfect ? 3.5 : 2.5)
+
+                // Screen outline only — no fill — so the camera feed shows straight through
+                RoundedRectangle(cornerRadius: cornerRadius - 6, style: .continuous)
+                    .stroke(accent.opacity(0.4), lineWidth: 1)
+                    .padding(6)
+
+                // Dynamic-Island-style notch with a front camera dot — the only
+                // near-solid element, and small enough not to block anything meaningful
+                Capsule()
+                    .fill(Color.black.opacity(0.5))
+                    .frame(width: 24, height: 7)
+                    .overlay(
+                        Circle()
+                            .fill(Color.white.opacity(0.45))
+                            .frame(width: 3, height: 3)
+                            .offset(x: 6)
+                    )
+                    .offset(y: -phoneHeight / 2 + 15)
+
+                // Faint decorative side buttons
+                RoundedRectangle(cornerRadius: 1.2)
+                    .fill(accent.opacity(0.55))
+                    .frame(width: 2.5, height: 15)
+                    .offset(x: -(phoneWidth / 2 + 1.2), y: -phoneHeight / 2 + 38)
+                RoundedRectangle(cornerRadius: 1.2)
+                    .fill(accent.opacity(0.55))
+                    .frame(width: 2.5, height: 21)
+                    .offset(x: -(phoneWidth / 2 + 1.2), y: -phoneHeight / 2 + 62)
+                RoundedRectangle(cornerRadius: 1.2)
+                    .fill(accent.opacity(0.55))
+                    .frame(width: 2.5, height: 27)
+                    .offset(x: phoneWidth / 2 + 1.2, y: -phoneHeight / 2 + 46)
             }
+            .frame(width: phoneWidth, height: phoneHeight)
+            .rotationEffect(.degrees(phoneRotation))
+            .rotation3DEffect(.degrees(phoneTilt3D), axis: (x: 1, y: 0, z: 0), perspective: 0.35)
+            .offset(y: phoneVerticalOffset)
+            .opacity(hasFace ? 1.0 : 0.4)
+            .shadow(color: accent.opacity(state == .perfect ? 0.7 : 0), radius: 14)
         }
-        .frame(width: ringDiameter, height: ringDiameter)
-        .animation(.easeOut(duration: 0.15), value: rollDegrees)
-        .animation(.easeOut(duration: 0.15), value: verticalDegrees)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: phoneRotation)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: phoneVerticalOffset)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: phoneTilt3D)
         .animation(.easeOut(duration: 0.2), value: state)
         .animation(.easeOut(duration: 0.2), value: hasFace)
-    }
-}
-
-// MARK: - Light Source Compass
-// A smaller satellite compass using the exact same visual language as the pose
-// compass above it, but grading the DIRECTION AND QUALITY OF LIGHT instead of head
-// position. A sun icon drifts toward center as the light becomes even, bright
-// enough, and soft enough — reaching the innermost ring is what "Light: Perfect"
-// means, and is required (together with the pose) for auto-capture to fire.
-private struct LightCompassView: View {
-    let guidance: LightingGuidance
-
-    private let ringDiameter: CGFloat = 64
-    private let dotDiameter: CGFloat = 16
-    private var veryGoodDiameter: CGFloat { ringDiameter * CGFloat(SelfieCoach.veryGoodRatio) }
-    private var perfectDiameter: CGFloat { max(ringDiameter * CGFloat(SelfieCoach.perfectRatio), 14) }
-
-    private var accent: Color {
-        switch guidance.state {
-        case .perfect: return .yellow
-        case .veryGood: return Color(red: 1.0, green: 0.85, blue: 0.4)
-        case .good: return .white
-        case .needsWork, .unknown: return .white.opacity(0.5)
-        }
-    }
-
-    private var dotOffset: CGSize {
-        let radius = (ringDiameter - dotDiameter) / 2
-        let x = CGFloat(min(max(guidance.horizontalBias, -1.0), 1.0)) * radius
-        let y = CGFloat(min(max(-guidance.verticalBias, -1.0), 1.0)) * radius
-        return CGSize(width: x, height: y)
-    }
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.3), lineWidth: 1)
-
-            Circle()
-                .stroke(accent.opacity(0.4), lineWidth: 1)
-                .frame(width: veryGoodDiameter, height: veryGoodDiameter)
-
-            Circle()
-                .stroke(accent.opacity(guidance.state == .perfect ? 0.95 : 0.4), lineWidth: 1.2)
-                .frame(width: perfectDiameter, height: perfectDiameter)
-
-            if guidance.state == .perfect {
-                Circle()
-                    .stroke(accent.opacity(0.5), lineWidth: 6)
-                    .frame(width: perfectDiameter, height: perfectDiameter)
-                    .blur(radius: 5)
-            }
-
-            Image(systemName: "sun.max.fill")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(accent)
-                .shadow(color: accent.opacity(guidance.state == .perfect ? 0.8 : 0.0), radius: guidance.state == .perfect ? 5 : 0)
-                .offset(dotOffset)
-        }
-        .frame(width: ringDiameter, height: ringDiameter)
-        .animation(.easeOut(duration: 0.2), value: guidance.horizontalBias)
-        .animation(.easeOut(duration: 0.2), value: guidance.verticalBias)
-        .animation(.easeOut(duration: 0.2), value: guidance.state)
     }
 }
