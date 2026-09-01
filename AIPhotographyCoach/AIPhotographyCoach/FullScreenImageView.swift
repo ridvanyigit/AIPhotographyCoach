@@ -6,6 +6,7 @@ struct FullScreenImageView: View {
     var quality: CaptureQuality? = nil
     var metadata: PhotoMetadata? = nil
     var onDelete: (() -> Void)? = nil
+    var onReplace: ((UIImage, PhotoMetadata) -> Void)? = nil
     @Environment(\.dismiss) var dismiss
 
     @State private var showControls: Bool = true
@@ -152,7 +153,6 @@ struct FullScreenImageView: View {
         .confirmationDialog("Delete Photo", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete Photo", role: .destructive) {
                 onDelete?()
-                dismiss()
             }
             Button("Cancel", role: .cancel) { }
         } message: {
@@ -162,7 +162,7 @@ struct FullScreenImageView: View {
             ShareSheet(activityItems: [image])
         }
         .sheet(isPresented: $showInfoSheet) {
-            PhotoInfoSheet(image: image, metadata: metadata)
+            PhotoInfoSheet(image: image, metadata: metadata, onReplace: onReplace)
         }
         .alert("Coming Soon", isPresented: $showComingSoonAlert) {
             Button("OK", role: .cancel) { }

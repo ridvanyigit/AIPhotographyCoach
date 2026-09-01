@@ -18,9 +18,10 @@ struct ContentView: View {
     @State private var isAutoCaptureEnabled: Bool = false // Off by default
     @State private var flashOpacity: Double = 0.0
     @State private var capturedImage: UIImage? = nil
-    @State private var lastSavedImage: UIImage? = nil
-    @State private var lastCaptureQuality: CaptureQuality? = nil
-    @State private var lastPhotoMetadata: PhotoMetadata? = nil
+    // Every photo captured this session, most recent last. Cleared automatically
+    // when the app closes — nothing here is meant to persist beyond that.
+    @State private var sessionPhotos: [SessionPhoto] = []
+    @State private var galleryStartIndex: Int = 0
     @State private var pendingCaptureQuality: CaptureQuality? = nil
     @State private var isShowingPreview: Bool = false
     @State private var isAnimatingCapturedImage: Bool = false
@@ -100,14 +101,7 @@ struct ContentView: View {
                 }
             }
             .fullScreenCover(isPresented: $isShowingPreview) {
-                if let imageToView = lastSavedImage {
-                    FullScreenImageView(
-                        image: imageToView,
-                        quality: lastCaptureQuality,
-                        metadata: lastPhotoMetadata,
-                        onDelete: { lastSavedImage = nil; lastCaptureQuality = nil; lastPhotoMetadata = nil }
-                    )
-                }
+                PhotoGalleryView(photos: $sessionPhotos, startIndex: galleryStartIndex)
             }
             .onAppear(perform: handleOnAppear)
             .onDisappear(perform: handleOnDisappear)
@@ -471,9 +465,13 @@ struct ContentView: View {
 
             // Gallery preview & camera flip
             HStack {
-                Button(action: { if lastSavedImage != nil { isShowingPreview = true } }) {
+                Button(action: {
+                    guard !sessionPhotos.isEmpty else { return }
+                    galleryStartIndex = sessionPhotos.count - 1
+                    isShowingPreview = true
+                }) {
                     Group {
-                        if let image = lastSavedImage {
+                        if let image = sessionPhotos.last?.image {
                             Image(uiImage: image).resizable().scaledToFill()
                         } else {
                             Color.gray.opacity(0.3)
@@ -764,12 +762,18 @@ struct ContentView: View {
             quality: pendingCaptureQuality
         )
 
-        saveToPhotoLibrary(processedImage, location: location)
+        // A stable id created up front, before any async work starts, so the
+        // geocoding callback and the library-save callback can each find and update
+        // the right entry in sessionPhotos later regardless of which one finishes
+        // first — including if the array has been reordered or trimmed by then.
+        let photoID = UUID()
+        let newPhoto = SessionPhoto(id: photoID, image: processedImage, quality: pendingCaptureQuality, metadata: metadata)
+
+        saveToPhotoLibrary(processedImage, location: location, photoID: photoID)
 
         // Reverse-geocoding is a network round trip, so it's filled in
         // asynchronously — the info panel just shows less until it arrives.
         if let location = location {
-            let captureDate = metadata.captureDate
             CLGeocoder().reverseGeocodeLocation(location) { placemarks, _ in
                 guard let placemark = placemarks?.first else { return }
                 let label = [placemark.locality, placemark.administrativeArea, placemark.country]
@@ -777,8 +781,8 @@ struct ContentView: View {
                     .joined(separator: ", ")
                 guard !label.isEmpty else { return }
                 DispatchQueue.main.async {
-                    if self.lastPhotoMetadata?.captureDate == captureDate {
-                        self.lastPhotoMetadata?.locationLabel = label
+                    if let idx = self.sessionPhotos.firstIndex(where: { $0.id == photoID }) {
+                        self.sessionPhotos[idx].metadata?.locationLabel = label
                     }
                 }
             }
@@ -790,14 +794,16 @@ struct ContentView: View {
         }
         withAnimation(.easeOut(duration: 0.2)) { flashOpacity = 0.0 }
 
+        // Appended right away so the gallery/thumbnail reflect the new photo
+        // immediately; the fly-to-corner animation below is purely visual and sits
+        // on top of everything else regardless.
+        sessionPhotos.append(newPhoto)
+
         capturedImage = processedImage
         isAnimatingCapturedImage = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { isAnimatingCapturedImage = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                lastSavedImage = processedImage
-                lastCaptureQuality = pendingCaptureQuality
-                lastPhotoMetadata = metadata
                 capturedImage = nil
             }
         }
@@ -805,15 +811,26 @@ struct ContentView: View {
 
     // Saves through PHPhotoLibrary (rather than the older UIImageWriteToSavedPhotosAlbum)
     // specifically so we can attach the capture location to the saved asset, the same
-    // way Apple's own Camera app does.
-    private func saveToPhotoLibrary(_ image: UIImage, location: CLLocation?) {
+    // way Apple's own Camera app does. Also captures the new asset's identifier, so
+    // the info panel's "reduce file size" tool can later replace this exact photo
+    // in place instead of leaving a duplicate behind.
+    private func saveToPhotoLibrary(_ image: UIImage, location: CLLocation?, photoID: UUID) {
         guard let data = image.jpegData(compressionQuality: 0.95) else { return }
+        var newIdentifier: String?
         PHPhotoLibrary.shared().performChanges({
             let request = PHAssetCreationRequest.forAsset()
             request.addResource(with: .photo, data: data, options: nil)
             if let location = location {
                 request.location = location
             }
-        }, completionHandler: nil)
+            newIdentifier = request.placeholderForCreatedAsset?.localIdentifier
+        }, completionHandler: { success, _ in
+            guard success else { return }
+            DispatchQueue.main.async {
+                if let idx = self.sessionPhotos.firstIndex(where: { $0.id == photoID }) {
+                    self.sessionPhotos[idx].metadata?.assetLocalIdentifier = newIdentifier
+                }
+            }
+        })
     }
 }

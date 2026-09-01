@@ -1,6 +1,5 @@
 import SwiftUI
 import MapKit
-import Photos
 
 // A properly organized photo-info panel — everything a curious user would actually
 // want to know about one selfie, grouped into clear sections, without drowning them
@@ -10,15 +9,9 @@ import Photos
 struct PhotoInfoSheet: View {
     let image: UIImage
     let metadata: PhotoMetadata?
+    var onReplace: ((UIImage, PhotoMetadata) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
-
-    // File-size reduction state, kept local to the sheet since it's just a preview/
-    // export tool and doesn't need to persist anywhere else.
-    @State private var compressionQuality: Double = 0.7
-    @State private var estimatedCompressedSize: Int = 0
-    @State private var isSavingCompressed: Bool = false
-    @State private var didSaveCompressed: Bool = false
 
     // Guarantees the sheet always has *something* to show, even for a photo that
     // somehow arrived with no captured metadata.
@@ -137,86 +130,7 @@ struct PhotoInfoSheet: View {
         Section("File") {
             infoRow(label: "Dimensions", value: "\(m.pixelWidth) × \(m.pixelHeight)")
             infoRow(label: "File Size", value: formatFileSize(m.fileSizeBytes))
-            compressionRow(originalSize: m.fileSizeBytes)
         }
-    }
-
-    // Lets someone shrink the file straight from the info panel: drag to preview the
-    // resulting size, then save it as a separate copy in Photos — the original is
-    // never touched or overwritten.
-    @ViewBuilder private func compressionRow(originalSize: Int) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Reduce File Size").foregroundStyle(.secondary)
-                Spacer()
-                Text(formatFileSize(estimatedCompressedSize))
-                    .font(.subheadline.monospacedDigit())
-                if let percent = reductionPercentText(original: originalSize) {
-                    Text(percent)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.green, in: Capsule())
-                }
-            }
-
-            Slider(value: $compressionQuality, in: 0.1...1.0, step: 0.05) { editing in
-                if editing {
-                    didSaveCompressed = false
-                } else {
-                    updateEstimatedSize()
-                }
-            }
-
-            if reductionIsMeaningful(originalSize) {
-                Button(action: saveCompressedCopy) {
-                    HStack(spacing: 6) {
-                        if isSavingCompressed {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: didSaveCompressed ? "checkmark.circle.fill" : "square.and.arrow.down")
-                        }
-                        Text(didSaveCompressed ? "Saved to Photos" : "Save Compressed Copy")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.borderless)
-                .disabled(isSavingCompressed || didSaveCompressed)
-            }
-        }
-        .padding(.vertical, 4)
-        .task { updateEstimatedSize() }
-    }
-
-    private func reductionIsMeaningful(_ originalSize: Int) -> Bool {
-        originalSize > 0 && estimatedCompressedSize < Int(Double(originalSize) * 0.95)
-    }
-
-    private func reductionPercentText(original: Int) -> String? {
-        guard reductionIsMeaningful(original) else { return nil }
-        let percent = Int(((Double(original) - Double(estimatedCompressedSize)) / Double(original)) * 100)
-        return "-\(percent)%"
-    }
-
-    private func updateEstimatedSize() {
-        estimatedCompressedSize = image.jpegData(compressionQuality: compressionQuality)?.count ?? resolvedMetadata.fileSizeBytes
-    }
-
-    // Saved as a brand-new asset rather than replacing the original, so nobody can
-    // accidentally lose their full-quality selfie by dragging a slider too far.
-    private func saveCompressedCopy() {
-        guard let data = image.jpegData(compressionQuality: compressionQuality) else { return }
-        isSavingCompressed = true
-        PHPhotoLibrary.shared().performChanges({
-            let request = PHAssetCreationRequest.forAsset()
-            request.addResource(.photo, data: data, options: nil)
-        }, completionHandler: { success, _ in
-            DispatchQueue.main.async {
-                isSavingCompressed = false
-                didSaveCompressed = success
-            }
-        })
     }
 
     // MARK: - Helpers

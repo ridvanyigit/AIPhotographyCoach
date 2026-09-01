@@ -13,9 +13,14 @@ struct PhotoMetadata {
     let location: CLLocation?
     var locationLabel: String?      // filled in asynchronously via reverse geocoding
 
-    let pixelWidth: Int
-    let pixelHeight: Int
-    let fileSizeBytes: Int
+    var pixelWidth: Int
+    var pixelHeight: Int
+    var fileSizeBytes: Int
+
+    // The Photos-library identifier for this exact asset, captured right after the
+    // initial save completes. Lets the info panel's "reduce file size" tool replace
+    // this specific photo in place later, instead of just leaving a duplicate behind.
+    var assetLocalIdentifier: String? = nil
 
     let iso: Double?
     let exposureDurationSeconds: Double?
