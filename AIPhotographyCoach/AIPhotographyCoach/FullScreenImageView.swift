@@ -4,6 +4,7 @@ import UIKit
 struct FullScreenImageView: View {
     let image: UIImage
     var quality: CaptureQuality? = nil
+    var metadata: PhotoMetadata? = nil
     var onDelete: (() -> Void)? = nil
     @Environment(\.dismiss) var dismiss
 
@@ -12,7 +13,7 @@ struct FullScreenImageView: View {
     @State private var showDeleteConfirmation: Bool = false
     @State private var showQualityBreakdown: Bool = false
     @State private var showComingSoonAlert: Bool = false
-    @State private var showInfoAlert: Bool = false
+    @State private var showInfoSheet: Bool = false
 
     var body: some View {
         ZStack {
@@ -110,7 +111,7 @@ struct FullScreenImageView: View {
                         // 4. Info
                         Button(action: {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            showInfoAlert = true
+                            showInfoSheet = true
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "info.circle")
@@ -160,15 +161,13 @@ struct FullScreenImageView: View {
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(activityItems: [image])
         }
+        .sheet(isPresented: $showInfoSheet) {
+            PhotoInfoSheet(image: image, metadata: metadata)
+        }
         .alert("Coming Soon", isPresented: $showComingSoonAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text("This feature is coming in a future update.")
-        }
-        .alert("Photo Info", isPresented: $showInfoAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("\(Int(image.size.width)) × \(Int(image.size.height)) px")
         }
     }
 

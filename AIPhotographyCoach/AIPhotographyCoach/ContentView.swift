@@ -1,5 +1,7 @@
 import SwiftUI
 import AVFoundation
+import Photos
+import CoreLocation
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -8,6 +10,7 @@ struct ContentView: View {
     @State private var visionManager = VisionManager()
     @State private var motionManager = MotionManager()
     @State private var voiceCoach = VoiceCoachManager()
+    @State private var locationManager = LocationManager()
     private let selfieCoach = SelfieCoach()
 
     // UI state
@@ -17,6 +20,7 @@ struct ContentView: View {
     @State private var capturedImage: UIImage? = nil
     @State private var lastSavedImage: UIImage? = nil
     @State private var lastCaptureQuality: CaptureQuality? = nil
+    @State private var lastPhotoMetadata: PhotoMetadata? = nil
     @State private var pendingCaptureQuality: CaptureQuality? = nil
     @State private var isShowingPreview: Bool = false
     @State private var isAnimatingCapturedImage: Bool = false
@@ -97,7 +101,12 @@ struct ContentView: View {
             }
             .fullScreenCover(isPresented: $isShowingPreview) {
                 if let imageToView = lastSavedImage {
-                    FullScreenImageView(image: imageToView, quality: lastCaptureQuality, onDelete: { lastSavedImage = nil; lastCaptureQuality = nil })
+                    FullScreenImageView(
+                        image: imageToView,
+                        quality: lastCaptureQuality,
+                        metadata: lastPhotoMetadata,
+                        onDelete: { lastSavedImage = nil; lastCaptureQuality = nil; lastPhotoMetadata = nil }
+                    )
                 }
             }
             .onAppear(perform: handleOnAppear)
@@ -604,9 +613,12 @@ struct ContentView: View {
     // MARK: - Lifecycle & Auto-Lock Engine
     private func handleOnAppear() {
         cameraManager.checkPermission()
+        locationManager.requestPermission()
         visionManager.isFrontCamera = (cameraManager.currentPosition == .front)
         motionManager.startUpdates()
-        cameraManager.onPhotoCaptured = { image in triggerPhotoAnimation(with: image) }
+        cameraManager.onPhotoCaptured = { image, rawMetadata, fileSizeBytes in
+            triggerPhotoAnimation(with: image, rawMetadata: rawMetadata, fileSizeBytes: fileSizeBytes)
+        }
         cameraManager.onFrameAvailable = { pixelBuffer in
             visionManager.processFrame(pixelBuffer)
             DispatchQueue.main.async {
@@ -733,12 +745,44 @@ struct ContentView: View {
         cameraManager.capturePhoto()
     }
 
-    private func triggerPhotoAnimation(with rawImage: UIImage) {
+    private func triggerPhotoAnimation(with rawImage: UIImage, rawMetadata: [String: Any], fileSizeBytes: Int) {
         // Apply the selected creative filter and aspect-ratio crop, then save
         // immediately — the user never needs to hold their pose after the shutter
         // fires, the photo is already processed and on its way to the library.
         let processedImage = SelfieImageProcessor.process(rawImage, filter: selfieFilter, aspect: aspectRatio)
-        UIImageWriteToSavedPhotosAlbum(processedImage, nil, nil, nil)
+        let location = locationManager.currentLocation
+
+        let metadata = PhotoMetadata.build(
+            image: processedImage,
+            rawMetadata: rawMetadata,
+            fileSizeBytes: fileSizeBytes,
+            location: location,
+            cameraPosition: cameraManager.currentPosition,
+            filter: selfieFilter,
+            aspect: aspectRatio,
+            lightingMode: selfieLightingMode,
+            quality: pendingCaptureQuality
+        )
+
+        saveToPhotoLibrary(processedImage, location: location)
+
+        // Reverse-geocoding is a network round trip, so it's filled in
+        // asynchronously — the info panel just shows less until it arrives.
+        if let location = location {
+            let captureDate = metadata.captureDate
+            CLGeocoder().reverseGeocodeLocation(location) { placemarks, _ in
+                guard let placemark = placemarks?.first else { return }
+                let label = [placemark.locality, placemark.administrativeArea, placemark.country]
+                    .compactMap { $0 }
+                    .joined(separator: ", ")
+                guard !label.isEmpty else { return }
+                DispatchQueue.main.async {
+                    if self.lastPhotoMetadata?.captureDate == captureDate {
+                        self.lastPhotoMetadata?.locationLabel = label
+                    }
+                }
+            }
+        }
 
         if let previousBrightness = previousScreenBrightness {
             UIScreen.main.brightness = previousBrightness
@@ -753,8 +797,23 @@ struct ContentView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 lastSavedImage = processedImage
                 lastCaptureQuality = pendingCaptureQuality
+                lastPhotoMetadata = metadata
                 capturedImage = nil
             }
         }
+    }
+
+    // Saves through PHPhotoLibrary (rather than the older UIImageWriteToSavedPhotosAlbum)
+    // specifically so we can attach the capture location to the saved asset, the same
+    // way Apple's own Camera app does.
+    private func saveToPhotoLibrary(_ image: UIImage, location: CLLocation?) {
+        guard let data = image.jpegData(compressionQuality: 0.95) else { return }
+        PHPhotoLibrary.shared().performChanges({
+            let request = PHAssetCreationRequest.forAsset()
+            request.addResource(with: .photo, data: data, options: nil)
+            if let location = location {
+                request.location = location
+            }
+        }, completionHandler: nil)
     }
 }

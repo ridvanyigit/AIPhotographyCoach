@@ -12,7 +12,10 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     let session = AVCaptureSession()
 
     var onFrameAvailable: ((CVPixelBuffer) -> Void)?
-    var onPhotoCaptured: ((UIImage) -> Void)?
+    // Hands back the raw image plus everything AVFoundation captured about the shot
+    // (EXIF/TIFF metadata, encoded file size) so the UI layer can build a rich
+    // PhotoMetadata record for the info panel.
+    var onPhotoCaptured: ((UIImage, [String: Any], Int) -> Void)?
 
     // Raw EXIF brightness value (BV) from the live video stream, smoothed to avoid flicker
     var currentBrightness: Double = 0.0
@@ -191,10 +194,11 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard let data = photo.fileDataRepresentation(), let image = UIImage(data: data) else { return }
 
-        // Hand the raw image back to the UI layer. Saving to the photo library happens
-        // after ContentView applies the selected filter/aspect crop, so we never save
-        // an unprocessed frame the user didn't actually choose.
-        DispatchQueue.main.async { self.onPhotoCaptured?(image) }
+        // Hand the raw image (plus its metadata and encoded size) back to the UI
+        // layer. Saving to the photo library happens after ContentView applies the
+        // selected filter/aspect crop, so we never save an unprocessed frame the
+        // user didn't actually choose.
+        DispatchQueue.main.async { self.onPhotoCaptured?(image, photo.metadata, data.count) }
     }
 
     // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
