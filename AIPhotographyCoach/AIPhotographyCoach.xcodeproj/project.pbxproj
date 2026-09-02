@@ -272,6 +272,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need access to your camera to analyze your camera angle and provide guidance.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to tag where each selfie was taken, shown in that photo's info panel. This is optional and never required to use the camera.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We need access to save your perfect shots to your photo library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library so you can delete photos you took with this app.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -310,6 +311,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need access to your camera to analyze your camera angle and provide guidance.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to tag where each selfie was taken, shown in that photo's info panel. This is optional and never required to use the camera.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "We need access to save your perfect shots to your photo library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library so you can delete photos you took with this app.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

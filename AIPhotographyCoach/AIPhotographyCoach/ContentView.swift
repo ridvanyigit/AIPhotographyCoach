@@ -66,10 +66,15 @@ struct ContentView: View {
         selfieCoach.evaluateLighting(visionManager.lightingAnalysis)
     }
 
-    // Auto-capture requires BOTH the pose and the light source to be dead-on —
-    // manual shooting is unaffected and always available.
+    // Auto-capture requires the pose to be dead-on AND the light to be at least
+    // "Very Good" — demanding the single tightest lighting tier on top of the
+    // tightest pose tier made the two almost never line up together, which is what
+    // made auto-capture feel broken. This keeps the bar meaningfully high (a
+    // genuinely bad pose or bad light still won't fire) without needing
+    // near-impossible precision on both axes at once. Manual shooting is always
+    // available regardless.
     private var isReadyForAutoCapture: Bool {
-        currentPose.state == .perfect && currentLighting.state == .perfect
+        currentPose.state == .perfect && (currentLighting.state == .perfect || currentLighting.state == .veryGood)
     }
 
     private var currentQuality: CaptureQuality {
@@ -194,7 +199,10 @@ struct ContentView: View {
         let pose = currentPose
         let lighting = currentLighting
         let isPoseReady = pose.state == .perfect
-        let isFullyPerfect = isPoseReady && lighting.state == .perfect
+        // Kept in sync with isReadyForAutoCapture — the badge should never claim
+        // "Perfect" (or stay silent) at a moment that wouldn't actually trigger a shot.
+        let isLightingReady = lighting.state == .perfect || lighting.state == .veryGood
+        let isFullyPerfect = isPoseReady && isLightingReady
 
         // Two-stage coaching: nail the pose first, then — once it's dead-center —
         // switch over to guiding the light source instead.
@@ -203,7 +211,7 @@ struct ContentView: View {
         if !isPoseReady {
             icon = pose.state.systemIcon
             text = pose.state.message
-        } else if lighting.state != .perfect {
+        } else if !isLightingReady {
             icon = "light.max"
             text = lighting.hint ?? lighting.state.message
         } else {
@@ -211,7 +219,7 @@ struct ContentView: View {
             text = "Perfect ✨"
         }
 
-        let showsWarmTint = (pose.state == .veryGood) || (isPoseReady && lighting.state == .veryGood)
+        let showsWarmTint = (pose.state == .veryGood) || (isPoseReady && lighting.state == .good)
 
         return (icon, text, isFullyPerfect, showsWarmTint)
     }
@@ -612,6 +620,10 @@ struct ContentView: View {
     private func handleOnAppear() {
         cameraManager.checkPermission()
         locationManager.requestPermission()
+        // Read/write (not just add-only) access is needed so a photo deleted from
+        // this app's preview can actually be deleted from the real Photos library
+        // too, not just from the in-app gallery.
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in }
         visionManager.isFrontCamera = (cameraManager.currentPosition == .front)
         motionManager.startUpdates()
         cameraManager.onPhotoCaptured = { image, rawMetadata, fileSizeBytes in
@@ -657,10 +669,10 @@ struct ContentView: View {
         }
     }
 
-    // Auto-capture engine: fills a progress ring once BOTH the pose AND the light
-    // source are perfect, then fires quickly — but requires a couple of consecutive
-    // good frames (not just one lucky noisy sample) before it commits, so a shaky
-    // near-miss can't slip through and get auto-captured as "Perfect".
+    // Auto-capture engine: fills a progress ring once the pose and light source are
+    // both good enough (see isReadyForAutoCapture), then fires quickly — but still
+    // requires a couple of consecutive good frames (not just one lucky noisy
+    // sample) before it commits, so a shaky near-miss can't slip through.
     private func handleAutoLockCapture(isReady: Bool) {
         guard isAutoCaptureEnabled && !isCountingDown else {
             autoLockProgress = 0.0
@@ -669,10 +681,10 @@ struct ContentView: View {
 
         if isReady {
             let now = Date()
-            guard now.timeIntervalSince(lastCaptureTime) > 1.8 else { return }
+            guard now.timeIntervalSince(lastCaptureTime) > 1.5 else { return }
 
             if autoLockProgress < 1.0 {
-                autoLockProgress += 0.4
+                autoLockProgress += 0.5
                 if autoLockProgress >= 1.0 {
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                     lastCaptureTime = now
@@ -681,7 +693,7 @@ struct ContentView: View {
                 }
             }
         } else {
-            autoLockProgress = max(0.0, autoLockProgress - 0.12)
+            autoLockProgress = max(0.0, autoLockProgress - 0.1)
         }
     }
 
@@ -744,32 +756,62 @@ struct ContentView: View {
     }
 
     private func triggerPhotoAnimation(with rawImage: UIImage, rawMetadata: [String: Any], fileSizeBytes: Int) {
-        // Apply the selected creative filter and aspect-ratio crop, then save
-        // immediately — the user never needs to hold their pose after the shutter
-        // fires, the photo is already processed and on its way to the library.
-        let processedImage = SelfieImageProcessor.process(rawImage, filter: selfieFilter, aspect: aspectRatio)
+        // Turn off the screen-flash simulation immediately — no reason to make the
+        // user wait for image processing before the screen returns to normal.
+        if let previousBrightness = previousScreenBrightness {
+            UIScreen.main.brightness = previousBrightness
+            previousScreenBrightness = nil
+        }
+        withAnimation(.easeOut(duration: 0.2)) { flashOpacity = 0.0 }
+
+        // Snapshot everything the background work needs, since @State can only be
+        // read/written safely from the main actor.
         let location = locationManager.currentLocation
+        let filter = selfieFilter
+        let aspect = aspectRatio
+        let lightingMode = selfieLightingMode
+        let quality = pendingCaptureQuality
+        let cameraPosition = cameraManager.currentPosition
 
-        let metadata = PhotoMetadata.build(
-            image: processedImage,
-            rawMetadata: rawMetadata,
-            fileSizeBytes: fileSizeBytes,
-            location: location,
-            cameraPosition: cameraManager.currentPosition,
-            filter: selfieFilter,
-            aspect: aspectRatio,
-            lightingMode: selfieLightingMode,
-            quality: pendingCaptureQuality
-        )
+        // The filter/crop processing and JPEG encoding for the library save are the
+        // slow part of taking a selfie — doing them here, off the main thread, is
+        // what makes the preview thumbnail appear right away instead of the UI
+        // stalling for a couple of seconds after every shot.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let processedImage = SelfieImageProcessor.process(rawImage, filter: filter, aspect: aspect)
+            let metadata = PhotoMetadata.build(
+                image: processedImage,
+                rawMetadata: rawMetadata,
+                fileSizeBytes: fileSizeBytes,
+                location: location,
+                cameraPosition: cameraPosition,
+                filter: filter,
+                aspect: aspect,
+                lightingMode: lightingMode,
+                quality: quality
+            )
+            let jpegData = processedImage.jpegData(compressionQuality: 0.95)
 
+            DispatchQueue.main.async {
+                self.finishPhotoCapture(processedImage: processedImage, metadata: metadata, jpegData: jpegData, location: location, quality: quality)
+            }
+        }
+    }
+
+    // Runs back on the main actor once background processing finishes: adds the
+    // photo to the session gallery, kicks off the library save + reverse geocoding,
+    // and plays the little "fly to the corner" capture animation.
+    private func finishPhotoCapture(processedImage: UIImage, metadata: PhotoMetadata, jpegData: Data?, location: CLLocation?, quality: CaptureQuality?) {
         // A stable id created up front, before any async work starts, so the
         // geocoding callback and the library-save callback can each find and update
         // the right entry in sessionPhotos later regardless of which one finishes
         // first — including if the array has been reordered or trimmed by then.
         let photoID = UUID()
-        let newPhoto = SessionPhoto(id: photoID, image: processedImage, quality: pendingCaptureQuality, metadata: metadata)
+        let newPhoto = SessionPhoto(id: photoID, image: processedImage, quality: quality, metadata: metadata)
 
-        saveToPhotoLibrary(processedImage, location: location, photoID: photoID)
+        if let jpegData = jpegData {
+            saveToPhotoLibrary(data: jpegData, location: location, photoID: photoID)
+        }
 
         // Reverse-geocoding is a network round trip, so it's filled in
         // asynchronously — the info panel just shows less until it arrives.
@@ -788,15 +830,6 @@ struct ContentView: View {
             }
         }
 
-        if let previousBrightness = previousScreenBrightness {
-            UIScreen.main.brightness = previousBrightness
-            previousScreenBrightness = nil
-        }
-        withAnimation(.easeOut(duration: 0.2)) { flashOpacity = 0.0 }
-
-        // Appended right away so the gallery/thumbnail reflect the new photo
-        // immediately; the fly-to-corner animation below is purely visual and sits
-        // on top of everything else regardless.
         sessionPhotos.append(newPhoto)
 
         capturedImage = processedImage
@@ -812,10 +845,9 @@ struct ContentView: View {
     // Saves through PHPhotoLibrary (rather than the older UIImageWriteToSavedPhotosAlbum)
     // specifically so we can attach the capture location to the saved asset, the same
     // way Apple's own Camera app does. Also captures the new asset's identifier, so
-    // the info panel's "reduce file size" tool can later replace this exact photo
-    // in place instead of leaving a duplicate behind.
-    private func saveToPhotoLibrary(_ image: UIImage, location: CLLocation?, photoID: UUID) {
-        guard let data = image.jpegData(compressionQuality: 0.95) else { return }
+    // deleting this photo later (see PhotoGalleryView) can remove the real asset too,
+    // not just the in-app preview.
+    private func saveToPhotoLibrary(data: Data, location: CLLocation?, photoID: UUID) {
         var newIdentifier: String?
         PHPhotoLibrary.shared().performChanges({
             let request = PHAssetCreationRequest.forAsset()

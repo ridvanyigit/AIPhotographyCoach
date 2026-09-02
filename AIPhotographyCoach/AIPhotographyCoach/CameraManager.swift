@@ -83,7 +83,11 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
 
             if self.session.canAddOutput(self.photoOutput) {
                 self.session.addOutput(self.photoOutput)
-                self.photoOutput.maxPhotoQualityPrioritization = .quality
+                // .speed skips the extra multi-frame fusion/noise-reduction work that
+                // .quality does, which is most of why a shot used to take a couple of
+                // seconds to reach the preview — a selfie doesn't need DSLR-grade
+                // per-shot processing to look good.
+                self.photoOutput.maxPhotoQualityPrioritization = .speed
             }
 
             // Tune autofocus/exposure specifically for close-range front-camera use
@@ -121,7 +125,7 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
 
     func capturePhoto() {
         let settings = AVCapturePhotoSettings()
-        settings.photoQualityPrioritization = .quality // Best available quality
+        settings.photoQualityPrioritization = .speed // Fastest path from shutter to preview
 
         if let photoConnection = photoOutput.connection(with: .video) {
             photoConnection.videoOrientation = currentVideoOrientation()
