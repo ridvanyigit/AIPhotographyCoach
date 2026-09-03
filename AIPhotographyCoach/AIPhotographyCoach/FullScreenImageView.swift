@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Photos
 
 struct FullScreenImageView: View {
     let image: UIImage
@@ -15,6 +16,7 @@ struct FullScreenImageView: View {
     @State private var showQualityBreakdown: Bool = false
     @State private var showComingSoonAlert: Bool = false
     @State private var showInfoSheet: Bool = false
+    @State private var showFilterEditor: Bool = false
 
     var body: some View {
         ZStack {
@@ -95,10 +97,10 @@ struct FullScreenImageView: View {
                             }
                         }
 
-                        // 3. Filters (coming soon)
+                        // 3. Filters
                         Button(action: {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            showComingSoonAlert = true
+                            showFilterEditor = true
                         }) {
                             VStack(spacing: 4) {
                                 Image(systemName: "slider.horizontal.3")
@@ -163,6 +165,9 @@ struct FullScreenImageView: View {
         }
         .sheet(isPresented: $showInfoSheet) {
             PhotoInfoSheet(image: image, metadata: metadata, onReplace: onReplace)
+        }
+        .fullScreenCover(isPresented: $showFilterEditor) {
+            FilterEditorView(originalImage: image, onSave: applyFilterEdit)
         }
         .alert("Coming Soon", isPresented: $showComingSoonAlert) {
             Button("OK", role: .cancel) { }
@@ -232,6 +237,63 @@ struct FullScreenImageView: View {
                 .foregroundColor(.white.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // Replaces this photo with the filtered version: deletes the old asset from
+    // Photos (when we know which one it is) and saves the edited image as its
+    // replacement, then pushes the result back up through onReplace so the app's
+    // own gallery and info panel immediately reflect the edit — the same pattern
+    // used elsewhere in the app for in-place photo replacement.
+    private func applyFilterEdit(_ editedImage: UIImage) {
+        guard let data = editedImage.jpegData(compressionQuality: 0.95) else { return }
+
+        let oldIdentifier = metadata?.assetLocalIdentifier
+        let location = metadata?.location
+        var newIdentifier: String?
+
+        PHPhotoLibrary.shared().performChanges({
+            if let oldIdentifier = oldIdentifier {
+                let assets = PHAsset.fetchAssets(withLocalIdentifiers: [oldIdentifier], options: nil)
+                if let asset = assets.firstObject {
+                    PHAssetChangeRequest.deleteAssets([asset] as NSArray)
+                }
+            }
+            let request = PHAssetCreationRequest.forAsset()
+            request.addResource(with: .photo, data: data, options: nil)
+            if let location = location {
+                request.location = location
+            }
+            newIdentifier = request.placeholderForCreatedAsset?.localIdentifier
+        }, completionHandler: { success, _ in
+            DispatchQueue.main.async {
+                guard success else { return }
+
+                var updatedMetadata = metadata ?? PhotoMetadata(
+                    captureDate: Date(),
+                    location: nil,
+                    locationLabel: nil,
+                    pixelWidth: editedImage.cgImage?.width ?? Int(editedImage.size.width),
+                    pixelHeight: editedImage.cgImage?.height ?? Int(editedImage.size.height),
+                    fileSizeBytes: data.count,
+                    iso: nil,
+                    exposureDurationSeconds: nil,
+                    apertureFNumber: nil,
+                    focalLength35mm: nil,
+                    flashFired: false,
+                    cameraPosition: "Front Camera",
+                    filterUsed: .none,
+                    aspectRatioUsed: .full,
+                    lightingModeUsed: .natural,
+                    quality: nil
+                )
+                updatedMetadata.fileSizeBytes = data.count
+                updatedMetadata.pixelWidth = editedImage.cgImage?.width ?? updatedMetadata.pixelWidth
+                updatedMetadata.pixelHeight = editedImage.cgImage?.height ?? updatedMetadata.pixelHeight
+                updatedMetadata.assetLocalIdentifier = newIdentifier
+
+                onReplace?(editedImage, updatedMetadata)
+            }
+        })
     }
 }
 
